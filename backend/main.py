@@ -75,6 +75,8 @@ def viewer(request: Request):
         if auth_header.lower().startswith("bearer "):
             token = auth_header[7:].strip()
     if not token:
+        token = store.get_service_principal_token()
+    if not token:
         raise DataError("Sign in through Databricks Apps and enable user authorization with the SQL scope.", 401)
     label = (request.headers.get("x-forwarded-email") or
              request.headers.get("x-forwarded-preferred-username") or

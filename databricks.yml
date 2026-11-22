@@ -15,9 +15,6 @@ resources:
       name: ${var.app_name}
       description: Marketing analytics, data exploration and Genie chat
       source_code_path: .
-      user_api_scopes:
-        - sql
-        - genie
       resources:
         - name: sql-warehouse
           sql_warehouse:

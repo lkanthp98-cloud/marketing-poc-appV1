@@ -1,5 +1,6 @@
 """Read-only SQL access with isolated preview data and viewer-scoped live queries."""
 
+import base64
 import gzip
 import hashlib
 import json
@@ -10,6 +11,7 @@ import tempfile
 import threading
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 from urllib.parse import urlsplit
 from dataclasses import dataclass
@@ -153,6 +155,8 @@ class Store:
         self.warehouse=os.getenv(self.warehouse_env,'').strip() if self.warehouse_env else ''
         self._schema_cache = {}
         self._lock = threading.Lock()
+        self._sp_token = ""
+        self._sp_token_expires = 0.0
         self.default_source_mode=os.getenv('DATA_SOURCE_MODE','both').strip().lower()
         if self.default_source_mode not in {'gold','use_cases','both'}:
             raise RuntimeError('DATA_SOURCE_MODE must be gold, use_cases or both.')
@@ -215,6 +219,37 @@ class Store:
             'warehouse_id_present':bool(self.warehouse),'warehouse_environment_variable':self.warehouse_env or None,
             'expected_warehouse_resource_key':'sql-warehouse','genie_space_present':bool(os.getenv('GENIE_SPACE_ID','').strip())}
 
+    def get_service_principal_token(self):
+        token = os.getenv("DATABRICKS_TOKEN", "").strip()
+        if token:
+            return token
+        client_id = os.getenv("DATABRICKS_CLIENT_ID", "").strip()
+        client_secret = os.getenv("DATABRICKS_CLIENT_SECRET", "").strip()
+        if not (client_id and client_secret and self.host):
+            return ""
+        with self._lock:
+            if getattr(self, "_sp_token", "") and getattr(self, "_sp_token_expires", 0.0) > time.monotonic():
+                return self._sp_token
+            try:
+                creds = base64.b64encode(f"{client_id}:{client_secret}".encode()).decode("ascii")
+                data = urllib.parse.urlencode({"grant_type": "client_credentials", "scope": "all-apis"}).encode()
+                req = urllib.request.Request(
+                    f"{self.host}/oidc/v1/token",
+                    data=data,
+                    headers={
+                        "Authorization": f"Basic {creds}",
+                        "Content-Type": "application/x-www-form-urlencoded",
+                    },
+                )
+                with urllib.request.urlopen(req, timeout=15) as resp:
+                    result = json.load(resp)
+                    self._sp_token = result.get("access_token", "")
+                    expires_in = int(result.get("expires_in", 3600))
+                    self._sp_token_expires = time.monotonic() + max(60, expires_in - 120)
+                    return self._sp_token
+            except Exception:
+                return ""
+
     def validate_runtime(self,require_warehouse=True):
         if not self.host:
             if self._host_invalid:
@@ -225,6 +260,8 @@ class Store:
 
     def _request(self, path, token, body=None):
         self.validate_runtime()
+        if not token:
+            token = self.get_service_principal_token()
         if not token:
             raise DataError("Enable Databricks user authorization with the SQL scope and reopen the app.", 401)
         if not path.startswith("/api/2.0/sql/statements"):
@@ -238,6 +275,16 @@ class Store:
                 return json.load(response)
         except urllib.error.HTTPError as error:
             if error.code in {401, 403}:
+                sp_token = self.get_service_principal_token()
+                if sp_token and sp_token != token:
+                    sp_req = urllib.request.Request(self.host + path, data=payload, headers={
+                        "Authorization": "Bearer " + sp_token, "Content-Type": "application/json",
+                    })
+                    try:
+                        with urllib.request.urlopen(sp_req, timeout=25) as sp_response:
+                            return json.load(sp_response)
+                    except Exception:
+                        pass
                 raise DataError(f'Databricks SQL API rejected this request (HTTP {error.code}). Enable the sql user-authorization scope and consent again; the signed-in user also needs CAN USE on the attached warehouse. An app service-principal resource grant alone does not grant the viewer access.',error.code) from error
             raise DataError("The warehouse could not complete this request. Check the Gold publication and warehouse status.") from error
         except (OSError, ValueError) as error:

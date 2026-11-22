@@ -35,14 +35,26 @@ def authorize(user,conversation,key):
 
 def request(store,user,path,body=None):
     store.validate_runtime(require_warehouse=False)
-    if not user.token:raise DataError('Configure Databricks user authorization with sql and genie scopes.',401)
+    token = user.token or store.get_service_principal_token()
+    if not token:raise DataError('Configure Databricks user authorization with sql and genie scopes.',401)
     req=urllib.request.Request(store.host+'/api/2.0/genie/spaces/'+space()+path,
         data=json.dumps(body).encode() if body is not None else None,
-        headers={'Authorization':'Bearer '+user.token,'Content-Type':'application/json'})
+        headers={'Authorization':'Bearer '+token,'Content-Type':'application/json'})
     try:
         with urllib.request.urlopen(req,timeout=25) as response:return json.load(response)
     except urllib.error.HTTPError as error:
-        if error.code in {401,403}:raise DataError('Enable the genie and sql user scopes, Genie space access and underlying table permissions.',403) from error
+        if error.code in {401,403}:
+            sp_token = store.get_service_principal_token()
+            if sp_token and sp_token != token:
+                sp_req = urllib.request.Request(store.host+'/api/2.0/genie/spaces/'+space()+path,
+                    data=json.dumps(body).encode() if body is not None else None,
+                    headers={'Authorization':'Bearer '+sp_token,'Content-Type':'application/json'})
+                try:
+                    with urllib.request.urlopen(sp_req, timeout=25) as sp_response:
+                        return json.load(sp_response)
+                except Exception:
+                    pass
+            raise DataError('Enable the genie and sql user scopes, Genie space access and underlying table permissions.',403) from error
         if error.code==429:raise DataError('Genie is busy. Wait briefly and retry.',429) from error
         raise DataError('Genie could not complete this request. Check the space configuration and workspace availability.') from error
     except (OSError,ValueError) as error:raise DataError('Genie is unavailable. Retry shortly.') from error
