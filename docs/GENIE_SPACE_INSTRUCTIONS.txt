@@ -1,0 +1,29 @@
+Suggested business context for the marketing Genie space. Review with the business owner.
+
+Use the curated Use Cases datasets. Keep native vendor delivery, synthetic paid cohorts,
+banking acquisition and e-commerce populations separate. Do not join facts at different
+grains without preaggregation and a documented attribution/allocation rule.
+
+Always state the reporting period, currency, source population and relevant metric definition.
+If the question omits essential scope, ask a clarifying question. Keep unresolved campaign
+mapping statuses identifiable. Never infer a campaign match from similar names.
+
+Vendor spend is platform-reported cost in its labeled currency. Do not sum currencies.
+Platform conversions are not CRM applications or funded accounts. Reach is scoped to a
+measurement window and is not additive across overlapping windows or scopes.
+
+Rates are ratios of compatible summed numerators and denominators; do not average row rates.
+Zero or missing denominators produce unavailable values, not zero-performance claims.
+Submission funnel counts describe submissions with linked stages, not necessarily distinct
+account/customer counts. Use one sales plan version when aggregating target actuals.
+
+Platform spend, invoice amounts and GL postings are related representations of costs.
+Compare them; do not add them as independent expenses. Retain signs of contribution proxies.
+Synthetic observed relationship contribution is not audited revenue, incremental ROI or LTV.
+
+Experiment conversion rates do not alone establish statistical significance. Brand survey
+waves must be comparable before calculating lift. Attribution does not establish causality.
+Do not manufacture missing KPI inputs or forecast values. Identify unavailable requirements.
+
+Prefer aggregate results and select the columns required to answer the question.
+Genie should use published data only; this app does not approve campaign mappings or modify data.

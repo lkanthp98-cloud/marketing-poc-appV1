@@ -1,0 +1,16 @@
+command: ['python', 'start.py']
+env:
+  - name: DATA_MODE
+    value: live
+  - name: GOLD_CATALOG
+    value: media-poc
+  - name: GOLD_SCHEMA
+    value: gold
+  - name: USE_CASES_CATALOG
+    value: source-data
+  - name: USE_CASES_SCHEMA
+    value: usecases
+  - name: DATABRICKS_WAREHOUSE_ID
+    valueFrom: sql-warehouse
+  - name: GENIE_SPACE_ID
+    valueFrom: genie-space

@@ -1,0 +1,35 @@
+bundle:
+  name: marketing-intelligence
+
+variables:
+  app_name:
+    default: marketing-intelligence
+  warehouse_id:
+    description: Existing SQL warehouse ID
+  genie_space_id:
+    description: Existing curated marketing Genie space ID
+
+resources:
+  apps:
+    marketing:
+      name: ${var.app_name}
+      description: Marketing analytics, data exploration and Genie chat
+      source_code_path: .
+      user_api_scopes: [sql, genie]
+      resources:
+        - name: sql-warehouse
+          sql_warehouse:
+            id: ${var.warehouse_id}
+            permission: CAN_USE
+        - name: genie-space
+          genie_space:
+            space_id: ${var.genie_space_id}
+            permission: CAN_RUN
+
+sync:
+  exclude:
+    - .venv/**
+    - node_modules/**
+    - '**/__pycache__/**'
+    - test-results/**
+    - playwright-report/**

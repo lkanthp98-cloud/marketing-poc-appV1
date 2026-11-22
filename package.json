@@ -1,0 +1,27 @@
+{
+  "name": "marketing-analytics",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "scripts": {
+    "dev": "vite frontend --host 127.0.0.1",
+    "build": "tsc --noEmit && vite build frontend",
+    "start": "python start.py",
+    "test:ui": "playwright test"
+  },
+  "dependencies": {
+    "@fontsource/inter": "^5.2.0",
+    "echarts": "^6.0.0",
+    "lucide-react": "^0.577.0",
+    "react": "^19.3.1",
+    "react-dom": "^19.3.1",
+    "typescript": "^5.9.3",
+    "vite": "^7.3.0",
+    "@vitejs/plugin-react": "^5.1.0",
+    "@types/react": "^19.2.0",
+    "@types/react-dom": "^19.2.0"
+  },
+  "devDependencies": {
+    "@playwright/test": "^1.58.0"
+  }
+}
