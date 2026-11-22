@@ -1,5 +1,7 @@
 # Marketing Intelligence
 
+**Independent source connections:** Connection Settings now supports **Gold only**, **Use Cases only**, or **both**. Disabled sources are never checked or queried. Gold-only dashboards read registered Gold marts; Use-Cases-only dashboards do not require Gold dimensions or metadata. Missing/inaccessible visuals are labeled unavailable. See [source modes and permission troubleshooting](docs/SOURCE_CONNECTIONS.md). Current checks: **45 backend tests and 7 browser scenarios passed**, including separate single-source app instances.
+
 **Host/resource fix:** The app now normalizes scheme-less `DATABRICKS_HOST` values to HTTPS for SQL and Genie. It distinguishes host configuration errors from a missing warehouse binding. Redeploy this updated source into the existing app. See [runtime troubleshooting](docs/RUNTIME_TROUBLESHOOTING.md).
 
 **Genie update:** The app now includes **Ask Genie**, with questions, follow-ups, SQL and result tables. [Genie setup and automatic attachment](docs/GENIE_SETUP.md) explains the included `databricks.yml` and `deploy.ps1`. The bundle creates the app with warehouse and Genie resource bindings after you supply their existing IDs. UI-created apps must attach both resources explicitly. User authorization now needs **sql** and **genie** scopes.

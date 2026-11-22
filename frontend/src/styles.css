@@ -226,6 +226,7 @@ tbody tr:hover { background: #f7fbfb; }
 .connection-dialog > p { color:#60778b; font-size:13px; line-height:1.7; }
 .connection-fields { display:grid; grid-template-columns:1fr 1fr; gap:16px; margin:24px 0; }
 .connection-fields label { display:flex; flex-direction:column; gap:8px; font-size:12px; color:#506b80; }
+.source-mode { display:flex; flex-direction:column; gap:8px; margin-top:20px; color:#34566d; font-size:13px; text-align:left; }.source-mode select { padding:11px; border:1px solid #bfd6e2; background:white; border-radius:7px; color:#20475f; }.connection-fields input:disabled { background:#f0f4f7; color:#98a8b5; }.chart-empty { overflow-wrap:anywhere; }
 .connection-fields input { width:100%; border:1px solid #d8e3eb; border-radius:7px; padding:10px; color:#23465f; }
 .schema-browser-controls { display:flex; align-items:center; gap:12px; flex-wrap:wrap; margin:18px 0; font-size:12px; color:#60778b; }
 .schema-browser-controls select { border:1px solid #d8e3eb; border-radius:7px; padding:9px; background:white; max-width:100%; }

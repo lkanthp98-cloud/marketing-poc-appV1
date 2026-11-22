@@ -4,6 +4,8 @@ command:
 env:
   - name: DATA_MODE
     value: live
+  - name: DATA_SOURCE_MODE
+    value: both
   - name: GOLD_CATALOG
     value: media-poc
   - name: GOLD_SCHEMA

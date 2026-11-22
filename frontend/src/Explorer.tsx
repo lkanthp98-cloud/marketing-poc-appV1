@@ -26,8 +26,8 @@ export function Explorer({ bootstrap, filters, revision, selected, onSelect, onR
   });
   return <>
     <div className="explorer-layer-picker" role="group" aria-label="Explorer data layer">
-      <button className={!allSchemas && layer === 'gold' ? 'selected' : ''} aria-pressed={!allSchemas && layer === 'gold'} onClick={() => { setAllSchemas(false); onLayer('gold'); }}><Database size={16} />Gold tables<span>{bootstrap.tables.length}</span></button>
-      <button className={!allSchemas && layer === 'use_cases' ? 'selected' : ''} aria-pressed={!allSchemas && layer === 'use_cases'} onClick={() => { setAllSchemas(false); onLayer('use_cases'); }}><Layers size={16} />Use case tables<span>{bootstrap.use_case_tables.length}</span></button>
+      <button className={!allSchemas && layer === 'gold' ? 'selected' : ''} aria-pressed={!allSchemas && layer === 'gold'} disabled={!bootstrap.enabled_sources.includes('gold')} onClick={() => { setAllSchemas(false); onLayer('gold'); }}><Database size={16} />Gold tables<span>{bootstrap.tables.length}</span></button>
+      <button className={!allSchemas && layer === 'use_cases' ? 'selected' : ''} aria-pressed={!allSchemas && layer === 'use_cases'} disabled={!bootstrap.enabled_sources.includes('use_cases')} onClick={() => { setAllSchemas(false); onLayer('use_cases'); }}><Layers size={16} />Use case tables<span>{bootstrap.use_case_tables.length}</span></button>
       <button className={allSchemas ? 'selected' : ''} aria-pressed={allSchemas} onClick={() => setAllSchemas(true)}><Columns3 size={16} />All schemas</button>
     </div>
     {allSchemas ? <SchemaBrowser revision={revision} /> : <>
@@ -63,7 +63,7 @@ export function Explorer({ bootstrap, filters, revision, selected, onSelect, onR
           {matchingLineage.map(row => <div className="lineage-row" key={String(row.dq_table)}><div><span>DQ source</span><strong>{String(row.dq_table)}</strong><small>{format(row.dq_rows)} passing rows</small></div><ChevronRight size={18} /><div><span>Conformed Gold</span><strong>{(row.gold_tables as string[]).join(', ')}</strong><small>{(row.selected_columns as string[]).length} selected source columns</small></div></div>)}
           {!lineage.loading && !matchingLineage.length && <p>Sources documented in the catalog · {info.sources}</p>}
         </section>}
-        {tab === 'metrics' && <section className="metadata-panel"><h3>Shared KPI dictionary</h3><p className="metadata-description">Published calculation policies shared by the business reports.</p>
+        {tab === 'metrics' && <section className="metadata-panel"><h3>Shared KPI dictionary</h3><p className="metadata-description">{bootstrap.source_mode === 'use_cases' ? 'Application reporting definitions. Gold policy metadata is not queried in this mode.' : 'Published calculation policies shared by the business reports.'}</p>
           {metrics.loading && <div className="skeleton table-skeleton" />}{metrics.error && <div className="inline-error">{metrics.error}</div>}
           {(metrics.data ?? []).map(row => <button className="definition-item" key={String(row.metric_id)} onClick={() => onRow(row)}><BookOpen size={16} /><div><strong>{title(String(row.metric_id))}</strong><p>{String(row.business_definition)}</p><code>{String(row.formula)}</code></div><ChevronRight size={16} /></button>)}
         </section>}
