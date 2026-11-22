@@ -15,7 +15,9 @@ resources:
       name: ${var.app_name}
       description: Marketing analytics, data exploration and Genie chat
       source_code_path: .
-      user_api_scopes: [sql, genie]
+      user_api_scopes:
+        - sql
+        - genie
       resources:
         - name: sql-warehouse
           sql_warehouse:
@@ -33,3 +35,14 @@ sync:
     - '**/__pycache__/**'
     - test-results/**
     - playwright-report/**
+    - artifacts/**
+    - '*.zip'
+    - '*.log'
+    - 'data/*.db'
+
+targets:
+  default:
+    mode: development
+    default: true
+  prod:
+    mode: production

@@ -257,7 +257,9 @@ class Store:
             time.sleep(0.4)
             result = self._request(f"/api/2.0/sql/statements/{statement_id}", viewer.token)
         if result.get("status", {}).get("state") != "SUCCEEDED":
-            raise DataError("The query failed. Confirm that the current Gold notebook has been published and your identity can read its tables.")
+            err_msg = result.get("status", {}).get("error", {}).get("message", "")
+            detail = f": {err_msg}" if err_msg else ""
+            raise DataError(f"The query failed{detail}. Confirm that the current Gold notebook has been published and your identity can read its tables.")
         columns = result.get("manifest", {}).get("schema", {}).get("columns", [])
         output = []
         chunk = result.get("result") or {}

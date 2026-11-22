@@ -245,6 +245,12 @@ class ReportingTests(unittest.TestCase):
             self.assertEqual(response.status_code, 401)
         self.assertEqual(self.client.get('/api/bootstrap').headers['Cache-Control'], 'no-store')
 
+    def test_live_mode_accepts_authorization_bearer_header(self):
+        rows=[{'table_catalog':'media-poc','table_schema':'gold','table_name':'dim_campaign','column_name':'campaign_key','full_data_type':'STRING'}]
+        with patch.object(store,'mode','live'),patch.object(store,'query',return_value=rows):
+            response = self.client.get('/api/workspace-schema', headers={'Authorization': 'Bearer test-bearer-token'})
+            self.assertEqual(response.status_code, 200)
+
 
 class WarehouseTests(unittest.TestCase):
     def test_scope_and_viewer_both_isolate_column_cache(self):

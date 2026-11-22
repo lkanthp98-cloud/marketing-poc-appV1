@@ -33,8 +33,14 @@ The included **databricks.yml** defines the app, resource bindings and authoriza
 
 From the extracted app directory, with the current Databricks CLI installed and authenticated, run:
 
+On Windows (PowerShell):
 ```powershell
 .\deploy.ps1 -WarehouseId 'YOUR_WAREHOUSE_ID' -GenieSpaceId 'YOUR_GENIE_SPACE_ID' -AppName 'marketing-intelligence-genie' -Profile 'YOUR_CLI_PROFILE'
+```
+
+On Linux / macOS (Bash):
+```bash
+./deploy.sh YOUR_WAREHOUSE_ID YOUR_GENIE_SPACE_ID marketing-intelligence-genie YOUR_CLI_PROFILE
 ```
 
 This validates the bundle, creates/updates the bundle-managed app with both resources attached, uploads the source, and starts the app. Supply the two workspace-specific IDs once; they cannot be inferred from column exports. Add `-ValidateOnly` to validate without deployment. The person deploying needs permission to create/manage the app and attach the selected resources.

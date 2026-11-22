@@ -1,4 +1,6 @@
-command: ['python', 'start.py']
+command:
+  - "python"
+  - "start.py"
 env:
   - name: DATA_MODE
     value: live

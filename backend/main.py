@@ -66,8 +66,16 @@ def viewer(request: Request):
         return Viewer()
     token = request.headers.get("x-forwarded-access-token", "")
     if not token:
+        auth_header = request.headers.get("authorization", "")
+        if auth_header.lower().startswith("bearer "):
+            token = auth_header[7:].strip()
+    if not token:
         raise DataError("Sign in through Databricks Apps and enable user authorization with the SQL scope.", 401)
-    return Viewer(token, request.headers.get("x-forwarded-email", "Databricks viewer"))
+    label = (request.headers.get("x-forwarded-email") or
+             request.headers.get("x-forwarded-preferred-username") or
+             request.headers.get("x-forwarded-user") or
+             "Databricks viewer")
+    return Viewer(token, label)
 
 
 def query_filters(
@@ -223,7 +231,12 @@ def chart_data(spec, filters, user):
 
 @app.get("/health")
 def health():
-    return {"status": "ok", "mode": store.mode}
+    return {
+        "status": "ok",
+        "mode": store.mode,
+        "workspace_host_valid": bool(store.host),
+        "warehouse_id_present": bool(store.warehouse),
+    }
 
 
 @app.get('/api/runtime-config')

@@ -7,3 +7,6 @@ test-results
 .env
 data/*.db
 .git
+artifacts
+*.zip
+*.log
