@@ -52,9 +52,19 @@ def request(store,user,path,body=None):
                 try:
                     with urllib.request.urlopen(sp_req, timeout=25) as sp_response:
                         return json.load(sp_response)
+                except urllib.error.HTTPError as sp_err:
+                    raise DataError(
+                        f"Genie API rejected request (HTTP {sp_err.code}). "
+                        "Ensure the Genie space has CAN RUN permission and tables have SELECT permissions in Catalog Explorer.",
+                        sp_err.code,
+                    ) from sp_err
                 except Exception:
                     pass
-            raise DataError('Enable the genie and sql user scopes, Genie space access and underlying table permissions.',403) from error
+            raise DataError(
+                f"Genie API rejected request (HTTP {error.code}). "
+                "Ensure the user or service principal has CAN RUN on the Genie space and SELECT permissions in Catalog Explorer.",
+                error.code,
+            ) from error
         if error.code==429:raise DataError('Genie is busy. Wait briefly and retry.',429) from error
         raise DataError('Genie could not complete this request. Check the space configuration and workspace availability.') from error
     except (OSError,ValueError) as error:raise DataError('Genie is unavailable. Retry shortly.') from error

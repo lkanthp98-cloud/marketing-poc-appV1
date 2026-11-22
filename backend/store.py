@@ -230,25 +230,31 @@ class Store:
         with self._lock:
             if getattr(self, "_sp_token", "") and getattr(self, "_sp_token_expires", 0.0) > time.monotonic():
                 return self._sp_token
-            try:
-                creds = base64.b64encode(f"{client_id}:{client_secret}".encode()).decode("ascii")
-                data = urllib.parse.urlencode({"grant_type": "client_credentials", "scope": "all-apis"}).encode()
-                req = urllib.request.Request(
-                    f"{self.host}/oidc/v1/token",
-                    data=data,
-                    headers={
-                        "Authorization": f"Basic {creds}",
-                        "Content-Type": "application/x-www-form-urlencoded",
-                    },
-                )
-                with urllib.request.urlopen(req, timeout=15) as resp:
-                    result = json.load(resp)
-                    self._sp_token = result.get("access_token", "")
-                    expires_in = int(result.get("expires_in", 3600))
-                    self._sp_token_expires = time.monotonic() + max(60, expires_in - 120)
-                    return self._sp_token
-            except Exception:
-                return ""
+            creds = base64.b64encode(f"{client_id}:{client_secret}".encode()).decode("ascii")
+            for scope in ("all-apis", None):
+                try:
+                    payload = {"grant_type": "client_credentials"}
+                    if scope:
+                        payload["scope"] = scope
+                    data = urllib.parse.urlencode(payload).encode()
+                    req = urllib.request.Request(
+                        f"{self.host}/oidc/v1/token",
+                        data=data,
+                        headers={
+                            "Authorization": f"Basic {creds}",
+                            "Content-Type": "application/x-www-form-urlencoded",
+                        },
+                    )
+                    with urllib.request.urlopen(req, timeout=15) as resp:
+                        result = json.load(resp)
+                        self._sp_token = result.get("access_token", "")
+                        expires_in = int(result.get("expires_in", 3600))
+                        self._sp_token_expires = time.monotonic() + max(60, expires_in - 120)
+                        if self._sp_token:
+                            return self._sp_token
+                except Exception:
+                    continue
+            return ""
 
     def validate_runtime(self,require_warehouse=True):
         if not self.host:
@@ -283,9 +289,19 @@ class Store:
                     try:
                         with urllib.request.urlopen(sp_req, timeout=25) as sp_response:
                             return json.load(sp_response)
+                    except urllib.error.HTTPError as sp_err:
+                        raise DataError(
+                            f"Databricks SQL API rejected both user and service principal requests (HTTP {sp_err.code}). "
+                            "Verify the attached SQL warehouse has CAN USE permission and the App or user has SELECT permissions on tables in Catalog Explorer.",
+                            sp_err.code,
+                        ) from sp_err
                     except Exception:
                         pass
-                raise DataError(f'Databricks SQL API rejected this request (HTTP {error.code}). Enable the sql user-authorization scope and consent again; the signed-in user also needs CAN USE on the attached warehouse. An app service-principal resource grant alone does not grant the viewer access.',error.code) from error
+                raise DataError(
+                    f"Databricks SQL API rejected this request (HTTP {error.code}). "
+                    "Ensure the signed-in user or attached service principal has CAN USE on the SQL warehouse and SELECT on catalog tables.",
+                    error.code,
+                ) from error
             raise DataError("The warehouse could not complete this request. Check the Gold publication and warehouse status.") from error
         except (OSError, ValueError) as error:
             raise DataError("The SQL warehouse is unavailable. Retry after checking its status.") from error
