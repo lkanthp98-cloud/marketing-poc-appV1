@@ -220,7 +220,7 @@ class ReportingTests(unittest.TestCase):
             self.assertEqual(response.status_code,200,response.text)
             self.assertIn('Secure',response.headers['set-cookie'])
             saved=client.get('/api/connection',headers=headers).json()
-            self.assertEqual(saved['connection'],profile)
+            self.assertEqual(saved['connection'],{**profile,'source_mode':'both'})
             # Dashboard worker threads inherit this browser's request context.
             seen.clear(); result=client.get('/api/dashboard/campaigns',headers=headers)
             self.assertEqual(result.status_code,200,result.text)

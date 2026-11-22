@@ -1,12 +1,14 @@
 # Deploy the explorer-aligned Marketing Intelligence app
 
+**Connection modes update:** You may now connect **Gold only**, **Use Cases only**, or **both**. See [independent sources and SQL authorization](SOURCE_CONNECTIONS.md). DATA_SOURCE_MODE in app.yaml sets the default; browser Connection Settings overrides it. Disabled sources are not queried. Smaller publications load with unsupported visuals clearly marked unavailable.
+
 **Genie revision:** Follow [Genie setup](GENIE_SETUP.md) for automatic creation with warehouse + Genie resource attachments using `deploy.ps1`, or attach both resource keys manually in the UI. The current `app.yaml` references **genie-space** as well as **sql-warehouse**. Enable **sql** and **genie** user authorization scopes. The original SQL-only instructions below need these additions.
 
 This package contains the app source and compiled frontend. No Databricks deployment or live account access has been performed by Codex.
 
 ## Prepare the workspace
 
-The app is aligned to the uploaded explorer exports showing **113 Gold tables** and **30 Use Cases tables**, including metadata. The business pages use 28 published primary Use Cases datasets. They require the advanced 29-mart Gold contract represented in those exports. The separately supplied 17-mart Gold notebook does not produce every advanced input; select a complete compatible publication rather than replacing missing business values with sample data.
+The app is aligned to the uploaded explorer exports showing **113 Gold tables** and **30 Use Cases tables**, including metadata. All advanced visuals require the corresponding 29-mart contract. The separately supplied 17-mart Gold notebook supports fewer visuals; it can now connect in Gold-only mode with unsupported results marked unavailable. No missing business values are replaced with sample data in live mode.
 
 Confirm the Gold and Use Cases notebooks completed successfully. Defaults are:
 

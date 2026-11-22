@@ -33,7 +33,7 @@ function MetricCard({ metric, currency, comparing, onClick }: { metric: Metric; 
   return <button className="metric-card" onClick={onClick} aria-label={`Details for ${metric.label}`}>
     <div className="metric-label">{metric.label}<Info size={14} /></div>
     <strong className="metric-value">{format(metric.value, metric.format, currency, true)}</strong>
-    <div className="metric-footer">{comparing && metric.change !== null ? <><span className={`metric-change ${changeClass}`}>{positive ? <TrendingUp size={13} /> : <TrendingDown size={13} />}{format(Math.abs(metric.change), 'percent')}</span><span>vs previous period</span></> : <span>{metric.value === null ? 'No eligible observations' : metric.format === 'usd' ? 'Observed source values · USD' : comparing ? 'Previous period unavailable' : 'Selected reporting scope'}</span>}</div>
+    <div className="metric-footer">{comparing && metric.change !== null ? <><span className={`metric-change ${changeClass}`}>{positive ? <TrendingUp size={13} /> : <TrendingDown size={13} />}{format(Math.abs(metric.change), 'percent')}</span><span>vs previous period</span></> : <span>{metric.unavailable_reason ? 'Unavailable for selected source' : metric.value === null ? 'No eligible observations' : metric.format === 'usd' ? 'Observed source values · USD' : comparing ? 'Previous period unavailable' : 'Selected reporting scope'}</span>}</div>
   </button>;
 }
 
@@ -52,7 +52,7 @@ function Workspace({ bootstrap }: { bootstrap: Bootstrap }) {
   const [drawer, setDrawer] = useState<{ title: string; description?: string; table?: string; row?: Row } | null>(null);
   const [expanded, setExpanded] = useState<ChartData | null>(null);
   const [explorerTable, setExplorerTable] = useState('mart_vendor_media_daily');
-  const [explorerLayer, setExplorerLayer] = useState<DataLayer>('gold');
+  const [explorerLayer, setExplorerLayer] = useState<DataLayer>(bootstrap.enabled_sources.includes('gold') ? 'gold' : 'use_cases');
   const [help, setHelp] = useState(false);
   const [connectionOpen, setConnectionOpen] = useState(false);
   const { data, loading, error } = useResource<Dashboard>(!['explorer', 'genie'].includes(page) ? `/api/dashboard/${page}?${query(filters)}` : null, revision);
@@ -62,7 +62,7 @@ function Workspace({ bootstrap }: { bootstrap: Bootstrap }) {
   const showRow = useCallback((row: Row) => setDrawer({ title: 'Record details', row }), []);
   const selectExplorer = useCallback((table: string) => setExplorerTable(table), []);
   const selectLayer = useCallback((layer: DataLayer) => { setExplorerLayer(layer); setExplorerTable(''); }, []);
-  const activeLayer = page === 'explorer' ? explorerLayer : 'use_cases';
+  const activeLayer = page === 'explorer' ? explorerLayer : bootstrap.analytics_layer;
   const sourceLocation = activeLayer === 'gold' ? `${bootstrap.catalog}.${bootstrap.schema}` : `${bootstrap.analytics_catalog}.${bootstrap.analytics_schema}`;
   const current = navigation.find(item => item.id === page)!;
   useEffect(() => { if (!toast) return; const timer = setTimeout(() => setToast(''), 3000); return () => clearTimeout(timer); }, [toast]);
@@ -95,7 +95,7 @@ function Workspace({ bootstrap }: { bootstrap: Bootstrap }) {
       <div className="brand"><div className="brand-mark"><BarChart3 size={22} strokeWidth={2.1} /></div><div><strong>Marketing<span>Intelligence</span></strong></div></div>
       <div className="sidebar-section-label">WORKSPACE</div>
       <nav aria-label="Main navigation">{navigation.map(item => <button key={item.id} className={`nav-item ${page === item.id ? 'active' : ''}`} onClick={() => { setPage(item.id); setSidebarOpen(false); }}><item.icon size={18} /><span>{item.label}</span>{page === item.id && <span className="active-marker" />}</button>)}</nav>
-      <div className="sidebar-bottom"><div className="foundation"><Layers size={18} /><div><strong>Connected data foundation</strong><span>{bootstrap.sources} source feeds · Unity Catalog</span></div></div>
+      <div className="sidebar-bottom"><div className="foundation"><Layers size={18} /><div><strong>Connected data foundation</strong><span>{bootstrap.sources === null ? 'Published datasets' : `${bootstrap.sources} source feeds`} · Unity Catalog</span></div></div>
         <button className="sidebar-help" onClick={() => setHelp(true)}><CircleHelp size={17} />Definitions & availability</button>
         <div className="workspace-identity"><div className="avatar">{bootstrap.mode === 'preview' ? 'PV' : bootstrap.viewer.slice(0, 2).toUpperCase()}</div><div><strong>{bootstrap.mode === 'preview' ? 'POC workspace' : bootstrap.viewer}</strong><span>{bootstrap.mode === 'preview' ? 'Source-derived local preview' : 'Databricks user authorization'}</span></div></div>
       </div>
@@ -120,11 +120,11 @@ function Workspace({ bootstrap }: { bootstrap: Bootstrap }) {
         <div hidden={page !== 'genie'}><Genie /></div>
         {page === 'genie' ? null : page === 'explorer' ? <Explorer bootstrap={bootstrap} filters={filters} revision={revision} selected={explorerTable} onSelect={selectExplorer} onRow={showRow} layer={explorerLayer} onLayer={selectLayer} /> : error ? <section className="error-card"><Activity size={26} /><h2>We couldn’t load this report</h2><p>{error}</p><button className="button primary" onClick={() => setRevision(value => value + 1)}>Retry request</button></section> : loading ? <LoadingPage /> : data && <>
           <div className="population-note"><Info size={14} /><span>Vendor delivery, synthetic campaign cohorts and banking outcomes are separate reporting populations. Open a metric to inspect its scope.</span></div><div className="section-heading"><h2>Performance at a glance</h2><span>{filters.currency} where applicable<span className="separator">·</span>Ratio of totals</span></div>
-          <div className="kpi-grid">{data.metrics.map(metric => <MetricCard key={metric.label} metric={metric} currency={filters.currency} comparing={filters.compare} onClick={() => setDrawer({ title: metric.label, description: metric.description, table: metric.table, row: { value: metric.value, previous_period: metric.previous, reporting_table: metric.source, unsupported_filters: metric.unsupported_filters } })} />)}</div>
+          <div className="kpi-grid">{data.metrics.map(metric => <MetricCard key={metric.label} metric={metric} currency={filters.currency} comparing={filters.compare} onClick={() => setDrawer({ title: metric.label, description: metric.description, table: metric.table, row: { value: metric.value, previous_period: metric.previous, reporting_table: metric.source, unavailable_reason: metric.unavailable_reason, unsupported_filters: metric.unsupported_filters } })} />)}</div>
           {scopeLimitations.length > 0 && (filters.campaign || filters.platform || filters.product || filters.market || filters.plan || page === 'experiments') && <div className="scope-note"><Info size={14} /><span>Filters apply where the source grain supports them. Inspect a metric for scope; fixed experiment windows retain their configured period.</span></div>}
           <div className={`charts-grid page-${page}`}><Chart chart={data.charts[0]} currency={filters.currency} onExplore={explore} onPlatform={platformFilter} onExpand={setExpanded} /><Chart chart={data.charts[1]} currency={filters.currency} onExplore={explore} onPlatform={platformFilter} onExpand={setExpanded} /></div>
-          <div className="lower-grid"><Chart chart={data.charts[2]} currency={filters.currency} onExplore={explore} onPlatform={platformFilter} onExpand={setExpanded} /><div className="insight-card"><div className="insight-icon"><Layers size={20} /></div><span className="eyebrow">UNDERSTAND THE NUMBERS</span><h3>{page === 'overview' ? 'From performance to provenance.' : 'Every metric has a defined scope.'}</h3><p>{page === 'overview' ? 'Follow each result to its Gold table, reporting grain and source coverage. Explore the evidence behind your marketing decisions.' : 'Review the published formula, native currency and source population before comparing outcomes across channels.'}</p><button className="button secondary" onClick={() => explore(data.table)}><Database size={15} />Explore supporting data</button><div className="insight-meta"><Check size={13} />Published metric definitions</div></div></div>
-          <DataTable name={data.table} filters={filters} revision={revision} onRow={showRow} compact layer='use_cases' />
+          <div className="lower-grid"><Chart chart={data.charts[2]} currency={filters.currency} onExplore={explore} onPlatform={platformFilter} onExpand={setExpanded} /><div className="insight-card"><div className="insight-icon"><Layers size={20} /></div><span className="eyebrow">UNDERSTAND THE NUMBERS</span><h3>{page === 'overview' ? 'From performance to provenance.' : 'Every metric has a defined scope.'}</h3><p>{page === 'overview' ? 'Follow each result to its Gold table, reporting grain and source coverage. Explore the evidence behind your marketing decisions.' : 'Review the published formula, native currency and source population before comparing outcomes across channels.'}</p><button className="button secondary" disabled={!data.table} onClick={() => explore(data.table)}><Database size={15} />Explore supporting data</button><div className="insight-meta"><Check size={13} />Published metric definitions</div></div></div>
+          {data.table && <DataTable name={data.table} filters={filters} revision={revision} onRow={showRow} compact layer={bootstrap.analytics_layer} />}
         </>}
         <footer className="workspace-footer"><span>Marketing Intelligence</span><span>{bootstrap.mode === 'preview' ? 'Local CSV-derived preview · live workspace validation pending' : 'Databricks Gold · access follows your identity'}</span></footer>
       </main>

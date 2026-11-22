@@ -104,10 +104,10 @@ export function Chart({ chart, currency, onExplore, onPlatform, onExpand }: {
   }, [chart, currency, onPlatform]);
   return <section className="chart-card">
     <div className="panel-heading"><h3>{chart.title}</h3><div className="panel-actions">
-      <button className="icon-button" title="Explore supporting data" onClick={() => onExplore(chart.table)}><Database size={15} /></button>
+      <button className="icon-button" title="Explore supporting data" disabled={!!chart.unavailable_reason} onClick={() => onExplore(chart.table)}><Database size={15} /></button>
       <button className="icon-button" title="Expand chart" onClick={() => onExpand(chart)}><Maximize2 size={15} /></button>
     </div></div>
-    {chart.rows.length ? <div ref={element} className="chart-canvas" role="img" aria-label={chart.title} /> : <div className="chart-empty">No observations match these filters.</div>}
+    {chart.rows.length ? <div ref={element} className="chart-canvas" role="img" aria-label={chart.title} /> : <div className="chart-empty">{chart.unavailable_reason ? `Unavailable for this source: ${chart.unavailable_reason}` : 'No observations match these filters.'}</div>}
     <p className="chart-note">{chart.note}</p>
   </section>;
 }

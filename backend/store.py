@@ -153,6 +153,9 @@ class Store:
         self.warehouse=os.getenv(self.warehouse_env,'').strip() if self.warehouse_env else ''
         self._schema_cache = {}
         self._lock = threading.Lock()
+        self.default_source_mode=os.getenv('DATA_SOURCE_MODE','both').strip().lower()
+        if self.default_source_mode not in {'gold','use_cases','both'}:
+            raise RuntimeError('DATA_SOURCE_MODE must be gold, use_cases or both.')
 
     @property
     def catalog(self):return ACTIVE_CONNECTION.get().get("gold_catalog",self._defaults["gold_catalog"])
@@ -165,14 +168,24 @@ class Store:
 
     def connection(self):
         return {"gold_catalog":self.catalog,"gold_schema":self.schema,
-                "use_cases_catalog":self.use_cases_catalog,"use_cases_schema":self.use_cases_schema}
+                "use_cases_catalog":self.use_cases_catalog,"use_cases_schema":self.use_cases_schema,
+                "source_mode":self.source_mode}
+
+    @property
+    def source_mode(self):return ACTIVE_CONNECTION.get().get('source_mode',self.default_source_mode)
+
+    @property
+    def analytics_layer(self):return 'gold' if self.source_mode=='gold' else 'use_cases'
+
+    def layer_enabled(self,layer):return self.source_mode=='both' or self.source_mode==layer
 
     def location(self, name, layer=None):
         identifier(name)
         if layer is None:
-            layer = "use_cases" if name in ANALYTICS_MAPPING or name in USE_CASE_NAMES else "gold"
+            layer = self.analytics_layer if name in ANALYTICS_MAPPING else 'use_cases' if name in USE_CASE_NAMES else 'gold'
         if layer not in {"gold", "use_cases"}:
             raise DataError("Choose Gold or Use Cases.", 400)
+        if not self.layer_enabled(layer):raise DataError(f'The {layer} source is disabled in this connection.',400)
         if layer == "use_cases":
             physical = ANALYTICS_MAPPING.get(name, name)
             if physical not in USE_CASE_NAMES:
@@ -197,7 +210,7 @@ class Store:
         return ".".join(self.location(name, layer))
 
     def runtime_status(self):
-        return {'build':'2026-11-22-host-resource-fix','mode':self.mode,
+        return {'build':'2026-11-22-independent-sources','mode':self.mode,'source_mode':self.source_mode,
             'workspace_host_present':self._host_present,'workspace_host_valid':bool(self.host),
             'warehouse_id_present':bool(self.warehouse),'warehouse_environment_variable':self.warehouse_env or None,
             'expected_warehouse_resource_key':'sql-warehouse','genie_space_present':bool(os.getenv('GENIE_SPACE_ID','').strip())}
@@ -225,7 +238,7 @@ class Store:
                 return json.load(response)
         except urllib.error.HTTPError as error:
             if error.code in {401, 403}:
-                raise DataError("Your Databricks identity needs SQL warehouse and Gold table access.", 403) from error
+                raise DataError(f'Databricks SQL API rejected this request (HTTP {error.code}). Enable the sql user-authorization scope and consent again; the signed-in user also needs CAN USE on the attached warehouse. An app service-principal resource grant alone does not grant the viewer access.',error.code) from error
             raise DataError("The warehouse could not complete this request. Check the Gold publication and warehouse status.") from error
         except (OSError, ValueError) as error:
             raise DataError("The SQL warehouse is unavailable. Retry after checking its status.") from error
@@ -257,7 +270,10 @@ class Store:
             time.sleep(0.4)
             result = self._request(f"/api/2.0/sql/statements/{statement_id}", viewer.token)
         if result.get("status", {}).get("state") != "SUCCEEDED":
-            raise DataError("The query failed. Confirm that the current Gold notebook has been published and your identity can read its tables.")
+            detail=result.get('status',{}).get('error',{})
+            code=str(detail.get('error_code','QUERY_FAILED'))
+            message=str(detail.get('message','Check table publication, schema and read permissions.'))[:1000]
+            raise DataError(f'SQL execution failed [{code}]: {message}',403 if 'PERMISSION' in code else 503)
         columns = result.get("manifest", {}).get("schema", {}).get("columns", [])
         output = []
         chunk = result.get("result") or {}

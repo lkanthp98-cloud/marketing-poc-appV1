@@ -5,9 +5,12 @@ Validated 22 November 2026 against the supplied synthetic source files and all f
 | Check | Result |
 |---|---|
 | TypeScript strict compile and production Vite build | Passed |
-| Backend contract tests | 37 passed |
+| Backend contract tests | 45 passed |
 | Host/resource regression | Scheme-less/HTTPS hosts, warehouse aliases, isolated errors, SQL/Genie transport and safe diagnostics passed |
-| Playwright browser scenarios | 6 passed |
+| Playwright browser scenarios | 7 passed |
+| Independent source modes | Gold-only, Use-Cases-only and both passed; disabled sources were not queried |
+| Separate single-source browser instances | Both Gold-only and Use-Cases-only loaded all six dashboards and their enabled explorer |
+| Permission diagnostics | Warehouse probe runs before any source verification; later failures name the selected layer |
 | Genie lifecycle/result parsing and conversation isolation | Mocked API checks passed; no live Genie calls |
 | Genie sample UI | Guided CSV-derived answers, SQL, results, tab navigation and reset passed |
 | Automatic attachment deployment helper | PowerShell syntax checked; authenticated bundle deployment pending |

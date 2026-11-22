@@ -27,15 +27,20 @@ logger = logging.getLogger("marketing_app")
 
 class ConnectionSettings(BaseModel):
     model_config=ConfigDict(extra="forbid")
-    gold_catalog: str = Field(min_length=1,max_length=255)
-    gold_schema: str = Field(min_length=1,max_length=255)
-    use_cases_catalog: str = Field(min_length=1,max_length=255)
-    use_cases_schema: str = Field(min_length=1,max_length=255)
+    source_mode:Literal['gold','use_cases','both']='both'
+    gold_catalog: str = Field(default='',max_length=255)
+    gold_schema: str = Field(default='',max_length=255)
+    use_cases_catalog: str = Field(default='',max_length=255)
+    use_cases_schema: str = Field(default='',max_length=255)
 
     def profile(self):
         values={key:value.strip() for key,value in self.model_dump().items()}
-        if any(not value or "`" in value or any(ord(c)<32 for c in value) for value in values.values()):
+        active=(['gold_catalog','gold_schema'] if self.source_mode=='gold' else
+            ['use_cases_catalog','use_cases_schema'] if self.source_mode=='use_cases' else
+            ['gold_catalog','gold_schema','use_cases_catalog','use_cases_schema'])
+        if any(not values[key] or "`" in values[key] or any(ord(c)<32 for c in values[key]) for key in active):
             raise DataError("Enter valid catalog and schema names.",400)
+        for key in set(values)-set(active)-{'source_mode'}:values[key]=''
         return values
 
 
@@ -91,6 +96,7 @@ def query_filters(
 
 
 def table_catalog(user, layer="gold"):
+    if not store.layer_enabled(layer):return []
     if layer == "use_cases":
         records = store.query(f"SELECT * FROM {store.table('use_case_dataset_catalog')}", {}, user)
         rows = []
@@ -218,7 +224,7 @@ def chart_data(spec, filters, user):
             "measures": [{k: v for k, v in m.items() if k != "expression"} for m in spec.measures],
             "note": spec.note, "unsupported_filters": unsupported,
             "rows": [{key: clean_number(value) for key, value in row.items()} for row in rows],
-            "table":store.location(spec.table,"use_cases")[2],"source":store.source_label(spec.table,"use_cases")}
+            "table":store.location(spec.table,store.analytics_layer)[2],"source":store.source_label(spec.table,store.analytics_layer)}
 
 
 @app.get("/health")
@@ -236,19 +242,46 @@ def runtime_config(user:Viewer=Depends(viewer)):
 def bootstrap(user: Viewer = Depends(viewer)):
     catalog = table_catalog(user)
     use_cases = table_catalog(user,"use_cases")
-    campaigns = store.query(f"SELECT campaign_key, campaign_name FROM {store.table('dim_campaign')} ORDER BY campaign_key", {}, user)
+    analytics= catalog if store.analytics_layer=='gold' else use_cases
+    available={row['name'] for row in analytics}
+    warnings=[]
+    def has(name):return store.location(name,store.analytics_layer)[2] in available
+    def safe_query(sql,params=None):
+        try:return store.query(sql,params or {},user)
+        except DataError as error:
+            warnings.append(str(error));return []
     def options(table, field):
-        return [row["value"] for row in store.query(
-            f"SELECT DISTINCT {identifier(field)} AS value FROM {store.table(table)} WHERE {identifier(field)} IS NOT NULL ORDER BY {identifier(field)}", {}, user)]
+        if not has(table):return []
+        try:columns={c['name'] for c in store.columns(table,user)}
+        except DataError as error:warnings.append(str(error));return []
+        if field not in columns:return []
+        return [row["value"] for row in safe_query(
+            f"SELECT DISTINCT {identifier(field)} AS value FROM {store.table(table)} WHERE {identifier(field)} IS NOT NULL ORDER BY {identifier(field)}")]
+    # Reference filters come from the selected analytics source; Use Cases never requires Gold dimensions.
+    campaigns={}
+    for source in ['mart_vendor_media_daily','mart_demo_campaign_economics','mart_new_funded_customers_monthly']:
+        if not has(source):continue
+        try:columns={c['name'] for c in store.columns(source,user)}
+        except DataError as error:warnings.append(str(error));continue
+        key='campaign_key' if source in DEMO_CAMPAIGN_TABLES else 'resolved_campaign_key'
+        if key not in columns:continue
+        label=f"COALESCE(campaign_name, CAST({identifier(key)} AS STRING))" if 'campaign_name' in columns else f"CAST({identifier(key)} AS STRING)"
+        for row in safe_query(f"SELECT DISTINCT {identifier(key)} AS campaign_key, {label} AS campaign_name FROM {store.table(source)} WHERE {identifier(key)} IS NOT NULL"):
+            campaigns[row['campaign_key']]=row
     date_sources = " UNION ALL ".join(
-        f"SELECT {identifier(field)} AS report_day FROM {store.table(table)}" for table, field in DATE_FIELDS.items() if table in ANALYTICS_MAPPING)
-    dates = store.query("SELECT MIN(report_day) AS start, MAX(report_day) AS end FROM (" + date_sources + ") report_dates", {}, user)[0]
-    coverage = store.query(f"SELECT COUNT(*) AS sources FROM {store.table('gold_source_coverage')}", {}, user)[0]
+        f"SELECT {identifier(field)} AS report_day FROM {store.table(table)}" for table, field in DATE_FIELDS.items() if table in ANALYTICS_MAPPING and has(table))
+    date_rows=safe_query("SELECT MIN(report_day) AS start, MAX(report_day) AS end FROM ("+date_sources+") report_dates") if date_sources else []
+    dates=date_rows[0] if date_rows else {'start':'','end':''}
+    dates={key:(str(value)[:10] if value else '') for key,value in dates.items()}
+    coverage=safe_query(f"SELECT COUNT(*) AS sources FROM {store.table('gold_source_coverage','gold')}") if store.layer_enabled('gold') else []
     return {"mode": store.mode, "viewer": user.label, "catalog": store.catalog, "schema": store.schema,
-            "analytics_catalog":store.use_cases_catalog,"analytics_schema":store.use_cases_schema,"use_case_tables":use_cases,
-            "tables": catalog, "sources": coverage["sources"], "dates": dates, "campaigns": campaigns,
+            "source_mode":store.source_mode,"enabled_sources":[layer for layer in ['gold','use_cases'] if store.layer_enabled(layer)],
+            "analytics_layer":store.analytics_layer,"warnings":list(dict.fromkeys(warnings)),
+            "analytics_catalog":store.catalog if store.analytics_layer=='gold' else store.use_cases_catalog,
+            "analytics_schema":store.schema if store.analytics_layer=='gold' else store.use_cases_schema,"use_case_tables":use_cases,
+            "tables": catalog, "sources": coverage[0]["sources"] if coverage else None, "dates": dates, "campaigns": list(campaigns.values()),
             "platforms": options(VENDOR_TABLE, "platform"),
-            "products": options("dim_product", "product_id"), "markets": options("dim_market", "market_id"),
+            "products": options("mart_banking_funded_accounts_monthly", "product_id"), "markets": options("mart_banking_funded_accounts_monthly", "market_id"),
             "currencies": options(VENDOR_TABLE, "currency"), "plans": options("mart_sales_target_attainment_monthly", "plan_version"),
             "pages": [{"id": key, "title": value["title"], "subtitle": value["subtitle"]} for key, value in PAGES.items()]}
 
@@ -261,22 +294,40 @@ def dashboard(page: str, filters: dict = Depends(query_filters), user: Viewer = 
     if page not in PAGES:
         raise DataError("Unknown dashboard page.", 404)
     spec = PAGES[page]
+    published={row['name'] for row in table_catalog(user,store.analytics_layer)}
     def card(metric):
-        value, unsupported = metric_value(metric, filters, user)
-        previous = previous_period(filters, metric.table in MONTHLY) if filters.get("compare") and "period" not in unsupported else None
-        prior = metric_value(metric, previous, user)[0] if previous else None
+        unavailable=None
+        try:
+            if store.location(metric.table,store.analytics_layer)[2] not in published:
+                raise DataError('This dataset is not registered in the selected publication.',404)
+            value, unsupported = metric_value(metric, filters, user)
+            previous = previous_period(filters, metric.table in MONTHLY) if filters.get("compare") and "period" not in unsupported else None
+            prior = metric_value(metric, previous, user)[0] if previous else None
+        except DataError as error:value=None;prior=None;unsupported=[];unavailable=str(error)
         change = (value - prior) / abs(prior) if value is not None and prior not in {None, 0} else None
         return {"label": metric.label, "value": value, "format": metric.format, "description": metric.description,
-                "table": store.location(metric.table,"use_cases")[2], "source":store.source_label(metric.table,"use_cases"),
+                "table": store.location(metric.table,store.analytics_layer)[2], "source":store.source_label(metric.table,store.analytics_layer),
                 "change": change, "previous": prior, "direction": metric.direction,
-                "unsupported_filters": unsupported}
+                "unsupported_filters": unsupported,"unavailable_reason":unavailable}
+    def safe_chart(chart):
+        try:
+            if store.location(chart.table,store.analytics_layer)[2] not in published:
+                raise DataError('This dataset is not registered in the selected publication.',404)
+            return chart_data(chart,filters,user)
+        except DataError as error:
+            return {'title':chart.title,'kind':chart.kind,'table':store.location(chart.table,store.analytics_layer)[2],
+                'source':store.source_label(chart.table,store.analytics_layer),'dimensions':list(chart.dimensions),
+                'measures':[{k:v for k,v in m.items() if k!='expression'} for m in chart.measures],
+                'note':chart.note,'unsupported_filters':[],'rows':[],'unavailable_reason':str(error)}
     with ThreadPoolExecutor(max_workers=4) as pool:
         context=copy_context()
         cards = list(pool.map(lambda metric:context.copy().run(card,metric), spec["metrics"]))
-        charts = list(pool.map(lambda chart:context.copy().run(chart_data,chart,filters,user), spec["charts"]))
+        charts = list(pool.map(lambda chart:context.copy().run(safe_chart,chart), spec["charts"]))
+    candidates=[store.location(spec['table'],store.analytics_layer)[2]]+[c['table'] for c in cards]+[c['table'] for c in charts]
+    records=next((name for name in candidates if name in published),'')
     return {"title": spec["title"], "subtitle": spec["subtitle"], "eyebrow": spec["eyebrow"],
-            "metrics": cards, "charts": charts, "table":store.location(spec["table"],"use_cases")[2],
-            "source":store.source_label(spec["table"],"use_cases"),"mode": store.mode}
+            "metrics": cards, "charts": charts, "table":records,
+            "source":store.source_label(records,store.analytics_layer) if records else '',"mode": store.mode}
 
 
 @app.get("/api/table/{name}")
@@ -340,11 +391,16 @@ def export_csv(name: str, filters: dict = Depends(query_filters), user: Viewer =
 
 @app.get("/api/metadata/{kind}")
 def metadata(kind: str, user: Viewer = Depends(viewer)):
-    tables = {"lineage": "gold_source_coverage", "metrics": "gold_kpi_dictionary", "readiness": "use_case_readiness"}
-    if kind not in tables:
-        raise DataError("Unknown metadata view.", 404)
-    return [{key: normalize_json(value) for key, value in row.items()} for row in
-            store.query(f"SELECT * FROM {store.table(tables[kind])} LIMIT 2000", {}, user)]
+    if kind=='lineage' and not store.layer_enabled('gold'):return []
+    if kind=='metrics' and not store.layer_enabled('gold'):
+        return [{'metric_id':page+'_'+str(i),'business_definition':metric.description,'formula':metric.expression,
+            'definition_source':'Application reporting reference; no Gold policy approval is implied.'}
+            for page,spec in PAGES.items() for i,metric in enumerate(spec['metrics'])]
+    tables={'lineage':'gold_source_coverage','metrics':'gold_kpi_dictionary',
+            'readiness':'use_case_readiness' if store.layer_enabled('use_cases') else 'gold_use_case_readiness'}
+    if kind not in tables:raise DataError('Unknown metadata view.',404)
+    return [{key:normalize_json(value) for key,value in row.items()} for row in
+            store.query(f'SELECT * FROM {store.table(tables[kind])} LIMIT 2000',{},user)]
 
 
 @app.get("/api/schema/{name}")
@@ -360,43 +416,23 @@ def connection_settings(user: Viewer = Depends(viewer)):
 
 @app.post("/api/connection")
 def connect(settings:ConnectionSettings, user: Viewer = Depends(viewer)):
-    if store.mode!="live":
-        raise DataError("Sample mode uses local reference data. Connect to a live catalog after deploying with DATA_MODE=live.",400)
+    if store.mode!='live':
+        raise DataError('Sample mode uses local reference data. Connect live sources after deployment.',400)
     profile=settings.profile()
     token=ACTIVE_CONNECTION.set(profile)
     try:
-        table_catalog(user,"gold")
-        dataset_catalog=table_catalog(user,"use_cases")
-        published={row["name"] for row in dataset_catalog}
-        missing=set(ANALYTICS_MAPPING.values())-published
-        if missing:
-            raise DataError("Complete the primary Use Cases publication before connecting. Missing datasets: "+", ".join(sorted(missing)),400)
-        for row in dataset_catalog:
-            if row["kind"]!="mart":continue
-            reference=row["source_gold_table"]
-            parts=re.findall(r'`([^`]+)`',reference) or reference.split('.')
-            expected=[store.catalog,store.schema,store.logical_name(row["name"])]
-            if [part.casefold() for part in parts]!=[part.casefold() for part in expected]:
-                raise DataError(f"{row['name']} was published from a different Gold location. Select the Gold catalog/schema recorded in its source_gold_table metadata.",400)
-        # One metadata query validates all dashboard references before applying a connection.
-        catalog="`"+store.use_cases_catalog+"`"
-        rows=store.query(f"SELECT table_name, column_name FROM {catalog}.information_schema.columns WHERE table_schema = :schema",
-            {"schema":store.use_cases_schema},user)
-        available={}
-        for row in rows:available.setdefault(row["table_name"],set()).add(row["column_name"])
-        for spec in PAGES.values():
-            required=[(m.table,[m.expression],[]) for m in spec["metrics"]]
-            required += [(c.table,[m['expression'] for m in c.measures],c.dimensions) for c in spec["charts"]]
-            for source,expressions,dimensions in required:
-                physical=ANALYTICS_MAPPING[source]
-                fields=set(dimensions)
-                for expression in expressions:
-                    fields.update(re.findall(r'`([^`]+)`',expression))
-                    if re.fullmatch(r'[a-z][a-z0-9_]*',expression):fields.add(expression)
-                if physical not in published or fields-available.get(physical,set()):
-                    raise DataError(f"The selected Use Cases schema is incompatible: publish {physical} with the expected dashboard columns.",400)
-        response=JSONResponse({"status":"connected","connection":profile})
-        response.set_cookie("marketing_connection",json.dumps(profile),httponly=True,secure=True,samesite="lax",max_age=2592000)
+        try:store.query('SELECT 1 AS connection_ok',{},user)
+        except DataError as error:
+            raise DataError('Warehouse/API connection failed before any source was read: '+str(error),error.status) from error
+        verified={}
+        for layer in ['gold','use_cases']:
+            if not store.layer_enabled(layer):continue
+            try:verified[layer]=len(table_catalog(user,layer))
+            except DataError as error:
+                raise DataError(f'{layer} source metadata access failed: '+str(error),error.status) from error
+        response=JSONResponse({'status':'connected','connection':profile,'verified_source_objects':verified,
+            'verification':'Warehouse and selected publication metadata verified. Data permissions and columns are checked per visual.'})
+        response.set_cookie('marketing_connection',json.dumps(profile),httponly=True,secure=True,samesite='lax',max_age=2592000)
         return response
     finally:ACTIVE_CONNECTION.reset(token)
 
@@ -404,9 +440,10 @@ def connect(settings:ConnectionSettings, user: Viewer = Depends(viewer)):
 @app.get("/api/workspace-schema")
 def workspace_schema(user: Viewer = Depends(viewer)):
     if store.mode=="preview":
-        return {"verification":"UPLOADED_SCHEMA_REFERENCE","tables":list(WORKSPACE_CONTRACT["tables"].values())}
-    locations={store.catalog:{"bronze","silver","model",store.schema}}
-    locations.setdefault(store.use_cases_catalog,set()).add(store.use_cases_schema)
+        return {"verification":"UPLOADED_SCHEMA_REFERENCE","tables":[t for t in WORKSPACE_CONTRACT['tables'].values()
+            if store.layer_enabled('use_cases' if t['schema']=='usecases' else 'gold')]}
+    locations={store.catalog:{"bronze","silver","model",store.schema}} if store.layer_enabled("gold") else {}
+    if store.layer_enabled("use_cases"):locations.setdefault(store.use_cases_catalog,set()).add(store.use_cases_schema)
     tables={}
     for catalog,schemas in locations.items():
         params={f"schema{i}":schema for i,schema in enumerate(sorted(schemas))}
