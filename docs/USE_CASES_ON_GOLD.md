@@ -1,6 +1,6 @@
 # Use-case analytics on Gold
 
-Business logic is defined in `backend/catalog.py`. Each metric/chart issues a read-only query against the selected Gold location; `dashboard-data-mapping.csv` lists all 42 dashboard elements and their columns. There is no physical Use Cases publication step and no new quota usage.
+Business logic is defined in `backend/catalog.py`. Each metric/chart issues a read-only query against the selected Gold location; `dashboard-data-mapping.csv` lists all 42 dashboard elements and their columns in the original source Gold. There is no physical Use Cases publication step. The separate app_gold publisher creates a 30-table serving snapshot and requires 30 additional table slots; read-only app queries add no objects.
 
 | Use case | App surface | Existing Gold foundation | Practical scope |
 |---|---|---|---|
@@ -15,7 +15,7 @@ Business logic is defined in `backend/catalog.py`. Each metric/chart issues a re
 | UC09 Targets/budgets | Financial Performance; Gold Explorer | `mart_sales_target_attainment_monthly`, `mart_vendor_campaign_budget_utilization`, `mart_demo_campaign_budget_utilization` | Compatible month/product/market targets with one plan version; campaign budgets available in explorer |
 | UC10 Brand lift | Experiments & Brand; Gold Explorer | `mart_brand_survey_wave`, `mart_brand_comparison_eligibility` | Survey-cell observations and comparison eligibility; causal lift requires eligible treatment/control evidence |
 
-Rows above identify Gold inputs, not a claim that every table has its own specialized chart. Shared `dim_campaign`, Gold policy metadata and source coverage provide naming and definitions. The optional e-commerce domain remains separate and can be inspected through its Gold entities/marts.
+Rows above describe the broader original Gold foundation, not a claim that every table has its own specialized chart or is copied to app_gold. Shared `dim_campaign`, Gold policy metadata and source coverage provide naming and definitions. The app_gold subset excludes `mart_direct_mail_order_economics`, `mart_brand_comparison_eligibility`, the two campaign budget marts and optional e-commerce detail. Those broader records remain in the original Gold schema.
 
 Campaign filters use enterprise campaign keys, and platform filters use the actual platform field. A Gold grain without the selected key produces an unavailable result, never an unchanged overall total. Existing mart measures are aggregated at their declared grain; the app does not flatten raw facts together or allocate spend/outcomes across campaigns arbitrarily.
 

@@ -6,7 +6,7 @@ Live Genie uses the signed-in viewer's forwarded token, not a shared service-pri
 
 ## Prepare one Genie space
 
-Create or select a curated marketing Genie space in the same workspace as the app. Use the existing published datasets from `media-poc.gold`, with approved KPI definitions. Suggested starting datasets:
+After running the 30-table app subset publisher, create or select a curated marketing Genie space in the same workspace as the app. Use the published datasets from `media-poc.app_gold`, with approved KPI definitions. Suggested starting datasets:
 
 - `mart_vendor_media_daily`
 - `mart_demo_campaign_economics`

@@ -7,7 +7,7 @@ env:
   - name: GOLD_CATALOG
     value: media-poc
   - name: GOLD_SCHEMA
-    value: gold
+    value: app_gold
   - name: DATABRICKS_WAREHOUSE_ID
     valueFrom: sql-warehouse
   - name: GENIE_SPACE_ID

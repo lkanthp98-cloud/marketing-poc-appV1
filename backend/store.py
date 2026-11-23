@@ -163,7 +163,7 @@ class Store:
         return ".".join(self.location(name, layer))
 
     def runtime_status(self):
-        return {'build':'2026-11-23-gold-use-cases','mode':self.mode,'source_mode':self.source_mode,
+        return {'build':'2026-11-23-app-gold-subset','mode':self.mode,'source_mode':self.source_mode,
             'workspace_host_present':self._host_present,'workspace_host_valid':bool(self.host),
             'warehouse_id_present':bool(self.warehouse),'warehouse_environment_variable':self.warehouse_env or None,
             'expected_warehouse_resource_key':'sql-warehouse','genie_space_present':bool(os.getenv('GENIE_SPACE_ID','').strip())}

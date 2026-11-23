@@ -16,7 +16,7 @@ export function SchemaBrowser({ revision }: { revision: number }) {
     (key(table).toLowerCase().includes(search.toLowerCase()) || table.columns.some(column => column.name.toLowerCase().includes(search.toLowerCase()))));
   const info = tables.find(table => key(table) === selected) ?? tables[0];
   return <>
-    <div className="population-note"><Database size={15} /><span>{response.data?.verification === 'LIVE_AUTHORIZED_INFORMATION_SCHEMA' ? 'Live column metadata visible to your Databricks identity.' : 'Schema reference from all five uploaded explorer CSVs. This reference does not contain live records.'} Report filters do not affect schema metadata.</span></div>
+    <div className="population-note"><Database size={15} /><span>{response.data?.verification === 'LIVE_AUTHORIZED_INFORMATION_SCHEMA' ? 'Live column metadata for the selected app schema, visible to your Databricks identity.' : 'Schema reference from the uploaded explorer CSVs. This reference does not contain live records.'} Report filters do not affect schema metadata.</span></div>
     {response.error && <div className="inline-error">{response.error}</div>}
     <div className="schema-browser-controls"><label className="search-field"><Search size={16} /><input aria-label="Search tables or columns" placeholder="Search tables or columns…" value={search} onChange={event => setSearch(event.target.value)} /></label>
       <select aria-label="Schema location" value={scope} onChange={event => setScope(event.target.value)}><option value="">All catalog / schema locations</option>{scopes.map(name => <option key={name}>{name}</option>)}</select><span>{tables.length} tables</span></div>

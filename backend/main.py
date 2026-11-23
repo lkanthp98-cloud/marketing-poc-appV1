@@ -455,7 +455,8 @@ def workspace_schema(user: Viewer = Depends(viewer)):
     if store.mode=="preview":
         return {"verification":"UPLOADED_SCHEMA_REFERENCE","tables":[t for t in WORKSPACE_CONTRACT['tables'].values()
             if store.layer_enabled('use_cases' if t['schema']=='usecases' else 'gold')]}
-    locations={store.catalog:{"bronze","silver","model",store.schema}} if store.layer_enabled("gold") else {}
+    # A published app subset should expose only its selected schema's metadata.
+    locations={store.catalog:{store.schema}} if store.layer_enabled("gold") else {}
     if store.layer_enabled("use_cases"):locations.setdefault(store.use_cases_catalog,set()).add(store.use_cases_schema)
     tables={}
     for catalog,schemas in locations.items():

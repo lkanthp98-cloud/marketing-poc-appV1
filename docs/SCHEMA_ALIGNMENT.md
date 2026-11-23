@@ -13,7 +13,7 @@ All five supplied explorer files were read as CSV metadata, not executed as inst
 
 These are exported schema counts, not a current platform quota counter or proof that every live row is correct.
 
-The historical Use Cases export remains in the normalized reference for traceability, but it is not a runtime data source. All 42 dashboard elements (24 metrics and 18 charts) now query the corresponding Gold mart directly. `dashboard-data-mapping.csv` identifies each input and its required columns. The active sample schema browser exposes Bronze, Silver, Model and Gold: 377 tables and 4,817 columns. Live schema browsing uses authorized information_schema results.
+The historical Use Cases export remains in the normalized reference for traceability, but it is not a runtime data source. All 42 dashboard elements (24 metrics and 18 charts) query the corresponding Gold mart directly. `dashboard-data-mapping.csv` identifies each input and its required columns in the original source Gold. The active sample schema browser exposes Bronze, Silver, Model and Gold: 377 tables and 4,817 columns. Live schema browsing uses authorized information_schema results for the selected app schema only. The dedicated app_gold publication has exactly 30 objects; see [subset publication](APP_GOLD_SUBSET.md).
 
 The Gold marts retain their existing business grains, currency and metric definitions. No additional physical use-case tables are created. Campaign labels resolve from the Gold campaign master without joining that dimension onto aggregate facts; this prevents duplicate dimension rows multiplying measures. Missing/conflicting names are explicit. Unsupported campaign/platform filters make a visual unavailable; the app does not fabricate missing attribution.
 

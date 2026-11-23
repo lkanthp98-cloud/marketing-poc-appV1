@@ -17,7 +17,7 @@ The canonical warehouse variable is DATABRICKS_WAREHOUSE_ID. For compatibility w
 
 ## Safe diagnostics
 
-Open `/api/runtime-config` on the deployed app while signed in. It reports only configuration presence, binding variable names, mode and build identifier **2026-11-23-gold-use-cases**. It never returns hostnames, resource IDs, user tokens, client secrets or the full environment.
+Open `/api/runtime-config` on the deployed app while signed in. It reports only configuration presence, binding variable names, mode and build identifier **2026-11-23-app-gold-subset**. It never returns hostnames, resource IDs, user tokens, client secrets or the full environment.
 
 If `workspace_host_valid` and `warehouse_id_present` are both true, runtime binding checks have passed. Subsequent errors can concern authorization, warehouse readiness, tables or schemas and should be handled using their specific messages. This endpoint does not claim live query success.
 
