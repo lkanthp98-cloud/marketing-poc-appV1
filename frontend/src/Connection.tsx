@@ -6,7 +6,7 @@ type Profile = { source_mode: 'gold' | 'use_cases' | 'both'; gold_catalog: strin
 
 export function ConnectionDialog({ onClose }: { onClose: () => void }) {
   const settings = useResource<{ mode: string; connection: Profile }>('/api/connection');
-  const [profile, setProfile] = useState<Profile>({ source_mode: 'both', gold_catalog: '', gold_schema: '', use_cases_catalog: '', use_cases_schema: '' });
+  const [profile, setProfile] = useState<Profile>({ source_mode: 'gold', gold_catalog: '', gold_schema: '', use_cases_catalog: '', use_cases_schema: '' });
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const dialog = useRef<HTMLDivElement>(null);
@@ -35,12 +35,11 @@ export function ConnectionDialog({ onClose }: { onClose: () => void }) {
   }
   return <div className="overlay" onClick={onClose}><div ref={dialog} className="connection-dialog" role="dialog" aria-modal="true" aria-label="Live data connection" onClick={event => event.stopPropagation()}>
     <div className="drawer-heading"><div><span className="eyebrow">DATA CONNECTION</span><h2>Connect live data</h2></div><button className="icon-button" aria-label="Close connection settings" onClick={onClose}><X size={20} /></button></div>
-    <p>Connect Gold, Use Cases, or both. Only enabled sources are checked and queried. Queries use the attached SQL warehouse and your Databricks permissions.</p>
-    <label className="source-mode">Data sources<select aria-label="Data sources" value={profile.source_mode} onChange={event => setProfile(value => ({ ...value, source_mode: event.target.value as Profile['source_mode'] }))}><option value="gold">Gold only</option><option value="use_cases">Use Cases only</option><option value="both">Gold and Use Cases</option></select></label>
+    <p>Connect your Gold catalog and schema. All use-case analytics and the Gold explorer read this foundation using the attached SQL warehouse and your Databricks permissions.</p>
     {settings.data?.mode === 'preview' && <div className="scope-note">Sample mode uses source-derived local data. Live connections become available after deployment with DATA_MODE=live.</div>}
-    <div className="connection-fields">{([['gold_catalog', 'Gold catalog'], ['gold_schema', 'Gold schema'], ['use_cases_catalog', 'Use Cases catalog'], ['use_cases_schema', 'Use Cases schema']] as const).map(([key, label]) =>
-      <label key={key}>{label}<input aria-label={label} maxLength={255} disabled={busy || (profile.source_mode === 'gold' && key.startsWith('use_cases')) || (profile.source_mode === 'use_cases' && key.startsWith('gold'))} value={profile[key]} onChange={event => setProfile(value => ({ ...value, [key]: event.target.value }))} /></label>)}</div>
-    <p className="metadata-description">Gold-only dashboards use Gold marts. Use-Cases-only dashboards do not require Gold access. With both enabled, dashboards use Use Cases and the explorer offers both layers. Missing or inaccessible metrics are marked unavailable. No tables or permissions are changed.</p>
+    <div className="connection-fields">{([['gold_catalog', 'Gold catalog'], ['gold_schema', 'Gold schema']] as const).map(([key, label]) =>
+      <label key={key}>{label}<input aria-label={label} maxLength={255} disabled={busy} value={profile[key]} onChange={event => setProfile(value => ({ ...value, [key]: event.target.value }))} /></label>)}</div>
+    <p className="metadata-description">The app builds the use-case pages directly from published Gold marts and dimensions. Missing datasets or unsupported campaign/platform filters show an explanation. This connection creates no tables.</p>
     {(error || settings.error) && <div className="inline-error" role="alert">{error || settings.error}</div>}
     <button className="button primary" disabled={busy || settings.data?.mode !== 'live'} onClick={connect}>{busy ? <RefreshCw size={16} className="spinning" /> : <Database size={16} />}{busy ? 'Checking access and columns…' : 'Verify & connect'}</button>
   </div></div>;

@@ -1,4 +1,4 @@
-"""Exercise single and dual source connections using an isolated simulated live warehouse."""
+"""Exercise Gold connections and migration of legacy source preferences using an isolated simulated live warehouse."""
 import re
 import sqlite3
 import os
@@ -49,13 +49,13 @@ class SourceModeTests(unittest.TestCase):
     def run_mode(self,mode):
         with patch.object(store,'mode','live'),patch.object(store,'query',side_effect=self.warehouse):
             result=self.select(mode)
-            self.assertEqual(set(result['verified_source_objects']),{'gold','use_cases'} if mode=='both' else {mode})
+            self.assertEqual(set(result['verified_source_objects']),{'gold'})
             response=self.client.get('/api/bootstrap',headers=self.headers)
             self.assertEqual(response.status_code,200,response.text)
             bootstrap=response.json()
-            layer='gold' if mode=='gold' else 'use_cases'
+            layer='gold'
             self.assertEqual(bootstrap['analytics_layer'],layer)
-            self.assertEqual(bootstrap['sources'],None if mode=='use_cases' else 91)
+            self.assertEqual(bootstrap['sources'],91)
             for page in ['overview','campaigns','acquisition','digital','finance','experiments']:
                 response=self.client.get('/api/dashboard/'+page,headers=self.headers)
                 self.assertEqual(response.status_code,200,response.text)
@@ -70,23 +70,23 @@ class SourceModeTests(unittest.TestCase):
             response=self.client.get('/api/workspace-schema',headers=self.headers)
             self.assertEqual(response.status_code,200,response.text)
         if mode=='gold':self.assertFalse(any('`source-data`.`usecases`' in q or '`source-data`.information_schema' in q for q in self.queries))
-        if mode=='use_cases':self.assertFalse(any('`media-poc`.`gold`' in q or '`media-poc`.information_schema' in q for q in self.queries))
+        self.assertFalse(any('`source-data`' in q or '.`usecases`.' in q for q in self.queries))
         self.assertEqual(ACTIVE_CONNECTION.get(),{})
 
     def test_gold_only_has_no_use_cases_dependency(self):self.run_mode('gold')
-    def test_use_cases_only_has_no_gold_dependency(self):self.run_mode('use_cases')
-    def test_both_uses_use_cases_for_analytics_and_allows_both_explorers(self):self.run_mode('both')
+    def test_legacy_use_cases_cookie_migrates_to_configured_gold(self):self.run_mode('use_cases')
+    def test_legacy_both_cookie_uses_gold_only(self):self.run_mode('both')
 
     def test_deployment_default_source_mode_requires_no_browser_cookie(self):
         for mode in ['gold','use_cases','both']:
             with patch.dict(os.environ,{'DATA_SOURCE_MODE':mode}):
                 instance=Store()
-                self.assertEqual(instance.connection()['source_mode'],mode)
-                self.assertEqual(instance.analytics_layer,'gold' if mode=='gold' else 'use_cases')
+                self.assertEqual(instance.connection()['source_mode'],'gold')
+                self.assertEqual(instance.analytics_layer,'gold')
 
     def test_disabled_source_fields_are_optional_and_ignored(self):
         self.assertEqual(ConnectionSettings(source_mode='gold',gold_catalog='media-poc',gold_schema='gold').profile()['use_cases_catalog'],'')
-        self.assertEqual(ConnectionSettings(source_mode='use_cases',use_cases_catalog='source-data',use_cases_schema='usecases').profile()['gold_catalog'],'')
+        self.assertEqual(ConnectionSettings(source_mode='use_cases',use_cases_catalog='source-data',use_cases_schema='usecases').profile()['gold_catalog'],'media-poc')
         with self.assertRaises(DataError):ConnectionSettings(source_mode='gold').profile()
 
     def test_warehouse_failure_is_reported_before_either_source_is_read(self):
@@ -118,7 +118,7 @@ class SourceModeTests(unittest.TestCase):
         with patch.object(store,'mode','live'),patch.object(store,'query',side_effect=denied):
             response=self.client.post('/api/connection',json={'source_mode':'use_cases','use_cases_catalog':'source-data','use_cases_schema':'usecases'},headers=self.headers)
         self.assertEqual(response.status_code,403)
-        self.assertIn('use_cases source metadata access failed',response.text)
+        self.assertIn('gold source metadata access failed',response.text)
         self.assertNotIn('Gold table access',response.text)
 
 

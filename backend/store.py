@@ -76,47 +76,6 @@ def preview_database():
             os.close(handle)
             with gzip.open(archive, "rb") as compressed, open(name, "wb") as output:
                 output.write(compressed.read())
-            # Local-only views reproduce publication names over source-derived preview rows.
-            # These are not exported workspace data and are never created in Databricks.
-            connection = sqlite3.connect(name)
-            connection.row_factory = sqlite3.Row
-            try:
-                for source, target in ANALYTICS_MAPPING.items():
-                    present={row['name'] for row in connection.execute(f"PRAGMA table_info({identifier(source)})")}
-                    columns=WORKSPACE_CONTRACT['tables']['source-data.usecases.'+target]['columns']
-                    expressions=[]
-                    for column in columns:
-                        field=column['name']
-                        expression=("'local-preview'" if field=='_uc_publication_id' else
-                            "'media-poc.gold."+source+"'" if field=='_uc_source_gold_table' else
-                            identifier(field) if field in present else 'NULL')
-                        expressions.append(expression+' AS '+identifier(field))
-                    connection.execute(f"CREATE VIEW {identifier(target)} AS SELECT "+', '.join(expressions)+f" FROM {identifier(source)}")
-                catalog_spec = WORKSPACE_CONTRACT["tables"]["source-data.usecases.use_case_dataset_catalog"]["columns"]
-                readiness_spec = WORKSPACE_CONTRACT["tables"]["source-data.usecases.use_case_readiness"]["columns"]
-                for target, fields in (("use_case_dataset_catalog", catalog_spec), ("use_case_readiness", readiness_spec)):
-                    connection.execute(f"CREATE TABLE {identifier(target)} (" + ", ".join(identifier(c["name"])+" "+
-                        ("INTEGER" if c["type"]=="LONG" else "TEXT") for c in fields) + ")")
-                case_rows = connection.execute("SELECT * FROM gold_use_case_tables WHERE table_kind='mart'").fetchall()
-                mart_rows = connection.execute("SELECT * FROM gold_mart_catalog").fetchall()
-                for row in mart_rows:
-                    source = row["mart_table"]
-                    if source not in ANALYTICS_MAPPING: continue
-                    owners = sorted({r["use_case"] for r in case_rows if r["gold_table"]==source})
-                    values = (ANALYTICS_MAPPING[source], "`media-poc`.`gold`.`"+source+"`", json.dumps(owners),
-                        json.dumps([x for x in re.split(r'[\s,]+',row["grain_columns"]) if x]), row["model_sources"], row["metric_notes"],
-                        row["row_count"], row["row_count"], "LOCAL_PREVIEW_NOT_WORKSPACE_VALIDATED", "local-preview", None)
-                    connection.execute("INSERT INTO use_case_dataset_catalog VALUES ("+",".join("?" for _ in values)+")",values)
-                for row in connection.execute("SELECT * FROM gold_use_case_readiness").fetchall():
-                    sources = sorted({r["gold_table"] for r in case_rows if r["use_case"]==row["use_case"] and r["gold_table"] in ANALYTICS_MAPPING})
-                    if not sources: continue
-                    values=(row["use_case"],json.dumps(sources),json.dumps([ANALYTICS_MAPPING[s] for s in sources]),
-                        row["remaining_requirements"],row["implementation_status"],"LOCAL_PREVIEW_NOT_WORKSPACE_VALIDATED",
-                        "LOCAL_PREVIEW", "local-preview", None)
-                    connection.execute("INSERT INTO use_case_readiness VALUES ("+",".join("?" for _ in values)+")",values)
-                connection.commit()
-            finally:
-                connection.close()
             _preview_path = Path(name)
         return _preview_path
 
@@ -140,8 +99,8 @@ class Store:
             raise RuntimeError("A deployed Databricks app must explicitly use DATA_MODE=live.")
         self._defaults = {"gold_catalog":os.getenv("GOLD_CATALOG", "media-poc"),
             "gold_schema":os.getenv("GOLD_SCHEMA", "gold"),
-            "use_cases_catalog":os.getenv("USE_CASES_CATALOG", "source-data"),
-            "use_cases_schema":os.getenv("USE_CASES_SCHEMA", "usecases")}
+            "use_cases_catalog":'',
+            "use_cases_schema":''}
         self._host_present=bool(os.getenv('DATABRICKS_HOST','').strip())
         self._host_invalid=False
         try:self.host=normalize_workspace_host(os.getenv('DATABRICKS_HOST',''))
@@ -153,9 +112,8 @@ class Store:
         self.warehouse=os.getenv(self.warehouse_env,'').strip() if self.warehouse_env else ''
         self._schema_cache = {}
         self._lock = threading.Lock()
-        self.default_source_mode=os.getenv('DATA_SOURCE_MODE','both').strip().lower()
-        if self.default_source_mode not in {'gold','use_cases','both'}:
-            raise RuntimeError('DATA_SOURCE_MODE must be gold, use_cases or both.')
+        # Use-case pages are application projections of Gold, never a second publication.
+        self.default_source_mode='gold'
 
     @property
     def catalog(self):return ACTIVE_CONNECTION.get().get("gold_catalog",self._defaults["gold_catalog"])
@@ -172,25 +130,20 @@ class Store:
                 "source_mode":self.source_mode}
 
     @property
-    def source_mode(self):return ACTIVE_CONNECTION.get().get('source_mode',self.default_source_mode)
+    def source_mode(self):return 'gold'
 
     @property
-    def analytics_layer(self):return 'gold' if self.source_mode=='gold' else 'use_cases'
+    def analytics_layer(self):return 'gold'
 
-    def layer_enabled(self,layer):return self.source_mode=='both' or self.source_mode==layer
+    def layer_enabled(self,layer):return layer=='gold'
 
     def location(self, name, layer=None):
         identifier(name)
         if layer is None:
             layer = self.analytics_layer if name in ANALYTICS_MAPPING else 'use_cases' if name in USE_CASE_NAMES else 'gold'
         if layer not in {"gold", "use_cases"}:
-            raise DataError("Choose Gold or Use Cases.", 400)
+            raise DataError("Choose the Gold data source.", 400)
         if not self.layer_enabled(layer):raise DataError(f'The {layer} source is disabled in this connection.',400)
-        if layer == "use_cases":
-            physical = ANALYTICS_MAPPING.get(name, name)
-            if physical not in USE_CASE_NAMES:
-                raise DataError("This dataset is not in the exported Use Cases contract.", 404)
-            return self.use_cases_catalog, self.use_cases_schema, physical
         return self.catalog, self.schema, name
 
     def table(self, name, layer=None):
@@ -210,7 +163,7 @@ class Store:
         return ".".join(self.location(name, layer))
 
     def runtime_status(self):
-        return {'build':'2026-11-22-independent-sources','mode':self.mode,'source_mode':self.source_mode,
+        return {'build':'2026-11-23-gold-use-cases','mode':self.mode,'source_mode':self.source_mode,
             'workspace_host_present':self._host_present,'workspace_host_valid':bool(self.host),
             'warehouse_id_present':bool(self.warehouse),'warehouse_environment_variable':self.warehouse_env or None,
             'expected_warehouse_resource_key':'sql-warehouse','genie_space_present':bool(os.getenv('GENIE_SPACE_ID','').strip())}
@@ -306,9 +259,6 @@ class Store:
         if self.mode == "preview":
             rows = self.query(f"PRAGMA table_info({identifier(physical_name)})", {}, viewer)
             columns = [{"name": row["name"], "type": row["type"]} for row in rows]
-            if physical_name in USE_CASE_NAMES:
-                # Preview views project this exact exported schema; live types always come from UC.
-                columns=WORKSPACE_CONTRACT['tables']['source-data.usecases.'+physical_name]['columns']
         else:
             catalog = "`" + catalog_name.replace("`", "``") + "`"
             columns = self.query(

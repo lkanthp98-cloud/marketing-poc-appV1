@@ -116,39 +116,34 @@ class ReportingTests(unittest.TestCase):
             with self.subTest(table=item['name']):
                 self.get('/api/table/' + item['name'], size=1)
         self.assertEqual(len(self.get('/api/metadata/lineage')), 91)
-        self.assertEqual(len(self.get('/api/metadata/readiness')), 10)
+        self.assertEqual(len(self.get('/api/metadata/readiness')), 11)
         self.assertTrue(self.get('/api/metadata/metrics'))
 
-    def test_exported_use_case_location_inventory_and_full_data_are_accessible(self):
-        bootstrap=self.get('/api/bootstrap')
-        self.assertEqual((bootstrap['analytics_catalog'],bootstrap['analytics_schema']),('source-data','usecases'))
-        self.assertEqual(len(bootstrap['use_case_tables']),30)
-        self.assertEqual(sum(t['kind']=='mart' for t in bootstrap['use_case_tables']),28)
-        for item in bootstrap['use_case_tables']:
-            with self.subTest(table=item['name']):
-                data=self.get('/api/table/'+item['name'],layer='use_cases',size=1)
-                self.assertEqual(data['source'],'source-data.usecases.'+item['name'])
-        result=self.get('/api/dashboard/campaigns')
-        self.assertTrue(all(metric['table'] in ANALYTICS_MAPPING.values() for metric in result['metrics']))
-        self.assertTrue(all(chart['source'].startswith('source-data.usecases.') for chart in result['charts']))
+    def test_business_pages_use_gold_without_use_case_publications(self):
+        result=self.get('/api/bootstrap')
+        self.assertEqual((result['analytics_catalog'],result['analytics_schema']),('media-poc','gold'))
+        self.assertEqual(result['use_case_tables'],[])
+        self.assertEqual(result['enabled_sources'],['gold'])
+        for page in ['overview','campaigns','acquisition','digital','finance','experiments']:
+            result=self.get('/api/dashboard/'+page)
+            self.assertTrue(all(m['source'].startswith('media-poc.gold.') for m in result['metrics']))
+            self.assertTrue(all(c['source'].startswith('media-poc.gold.') for c in result['charts']))
 
-    def test_use_case_schema_does_not_read_data_and_contains_publication_columns(self):
+    def test_use_case_schema_and_data_requests_are_rejected_without_reading_them(self):
         with patch.object(store,'query',wraps=store.query) as query:
-            data=self.get('/api/schema/uc02_vendor_media_daily',layer='use_cases')
-        self.assertIn('_uc_publication_id',{c['name'] for c in data['schema']})
-        self.assertFalse(any('SELECT * FROM `uc02_vendor_media_daily`' in call.args[0] for call in query.call_args_list))
-        self.assertEqual(data['source'],'source-data.usecases.uc02_vendor_media_daily')
-        self.assertEqual(self.client.get('/api/table/uc02_vendor_media_daily').status_code,404)
-        self.assertEqual(self.client.get('/api/table/mart_vendor_media_daily',params={'layer':'use_cases'}).status_code,404)
+            for endpoint in ['schema','table','export']:
+                response=self.client.get('/api/'+endpoint+'/uc02_vendor_media_daily?layer=use_cases')
+                self.assertEqual(response.status_code,404)
+        query.assert_not_called()
 
-    def test_use_case_export_filters_preserve_source_rows_and_provenance(self):
-        data=self.get('/api/table/uc02_vendor_media_daily',layer='use_cases',search='youtube',size=100)
-        response=self.client.get('/api/export/uc02_vendor_media_daily',params={'layer':'use_cases','search':'youtube'})
-        records=list(csv.DictReader(io.StringIO(response.text)))
-        self.assertEqual(len(records),data['total'])
-        self.assertTrue(all(row['_uc_publication_id']=='local-preview' for row in records))
+    def test_unsupported_campaign_or_platform_filters_never_export_overall_totals(self):
+        for key,value in [('campaign','CMP001'),('platform','meta')]:
+            for endpoint in ['table','export']:
+                response=self.client.get('/api/'+endpoint+'/mart_banking_funded_accounts_monthly',params={key:value})
+                self.assertEqual(response.status_code,400,response.text)
+                self.assertIn('published Gold grain',response.text)
 
-    def test_mocked_live_namespace_routing_keeps_business_marts_in_use_cases(self):
+    def test_mocked_live_namespace_routing_keeps_business_marts_in_gold(self):
         captured=[]
         contract=WORKSPACE_CONTRACT['tables']
         def simulated_warehouse(sql,params,user):
@@ -172,21 +167,21 @@ class ReportingTests(unittest.TestCase):
             for page in ['overview','campaigns','acquisition','digital','finance','experiments']:
                 response=self.client.get('/api/dashboard/'+page,headers=headers)
                 self.assertEqual(response.status_code,200,response.text)
-            self.assertFalse(any(re.search(r'FROM `media-poc`\.`gold`\.`mart_',sql) for sql in captured))
-            self.assertTrue(any('`source-data`.`usecases`.`uc02_vendor_media_daily`' in sql for sql in captured))
+            self.assertTrue(any(re.search(r'FROM `media-poc`\.`gold`\.`mart_',sql) for sql in captured))
+            self.assertFalse(any('usecases' in sql or 'use_cases' in sql for sql in captured))
             captured.clear()
             response=self.client.get('/api/table/mart_vendor_media_daily?layer=gold&size=1',headers=headers)
             self.assertEqual(response.status_code,200,response.text)
             self.assertTrue(any('FROM `media-poc`.`gold`.`mart_vendor_media_daily`' in sql for sql in captured))
 
-    def test_all_five_uploaded_schema_exports_remain_associated_with_their_columns(self):
+    def test_gold_foundation_schema_reference_excludes_use_case_copies(self):
         data=self.get('/api/workspace-schema')
         self.assertEqual(data['verification'],'UPLOADED_SCHEMA_REFERENCE')
-        self.assertEqual(len(data['tables']),407)
-        self.assertEqual(sum(len(t['columns']) for t in data['tables']),5315)
+        self.assertEqual(len(data['tables']),377)
+        self.assertEqual(sum(len(t['columns']) for t in data['tables']),4817)
         self.assertEqual({(t['catalog'],t['schema']) for t in data['tables']},
-            {('media-poc',s) for s in ['bronze','silver','model','gold']}|{('source-data','usecases')})
-        table=next(t for t in data['tables'] if t['name']=='uc02_vendor_media_daily')
+            {('media-poc',s) for s in ['bronze','silver','model','gold']})
+        table=next(t for t in data['tables'] if t['name']=='mart_vendor_media_daily')
         self.assertIn({'name':'spend_amount','type':'DECIMAL'},table['columns'])
 
     def test_preview_connection_cannot_claim_a_live_connection(self):
@@ -220,11 +215,12 @@ class ReportingTests(unittest.TestCase):
             self.assertEqual(response.status_code,200,response.text)
             self.assertIn('Secure',response.headers['set-cookie'])
             saved=client.get('/api/connection',headers=headers).json()
-            self.assertEqual(saved['connection'],{**profile,'source_mode':'both'})
+            self.assertEqual(saved['connection'],{**profile,'source_mode':'gold','use_cases_catalog':'','use_cases_schema':''})
             # Dashboard worker threads inherit this browser's request context.
             seen.clear(); result=client.get('/api/dashboard/campaigns',headers=headers)
             self.assertEqual(result.status_code,200,result.text)
-            self.assertTrue(any('`reporting`.`marketing_usecases`.`uc02_vendor_media_daily`' in sql for sql in seen))
+            self.assertTrue(any('`alternate`.`analytics_gold`.`mart_vendor_media_daily`' in sql for sql in seen))
+            self.assertFalse(any('`reporting`' in sql for sql in seen))
             other=TestClient(app,base_url='https://testserver')
             default=other.get('/api/connection',headers={'x-forwarded-access-token':'browser-two'}).json()['connection']
             self.assertEqual(default['gold_catalog'],'media-poc')
@@ -247,17 +243,17 @@ class ReportingTests(unittest.TestCase):
 
 
 class WarehouseTests(unittest.TestCase):
-    def test_scope_and_viewer_both_isolate_column_cache(self):
+    def test_namespace_and_viewer_both_isolate_column_cache(self):
         warehouse=Store(); warehouse.mode='live'
         with patch.object(warehouse,'query',return_value=[{'name':'report_date','type':'DATE'}]) as query:
             warehouse.columns('mart_vendor_media_daily',Viewer('one'),'gold')
-            warehouse.columns('mart_vendor_media_daily',Viewer('one'),'use_cases')
+            token=ACTIVE_CONNECTION.set({'gold_catalog':'alternate','gold_schema':'analytics_gold'})
+            try:warehouse.columns('mart_vendor_media_daily',Viewer('one'),'gold')
+            finally:ACTIVE_CONNECTION.reset(token)
             warehouse.columns('mart_vendor_media_daily',Viewer('one'),'gold')
-            warehouse.columns('mart_vendor_media_daily',Viewer('two'),'use_cases')
+            warehouse.columns('mart_vendor_media_daily',Viewer('two'),'gold')
         self.assertEqual(query.call_count,3)
-        locations=[call.args[1] for call in query.call_args_list]
-        self.assertEqual(locations[0],{'schema':'gold','name':'mart_vendor_media_daily'})
-        self.assertEqual(locations[1],{'schema':'usecases','name':'uc02_vendor_media_daily'})
+        self.assertEqual(query.call_args_list[1].args[1],{'schema':'analytics_gold','name':'mart_vendor_media_daily'})
 
     def test_sql_api_parameter_binding_chunking_and_types(self):
         warehouse = Store()

@@ -17,7 +17,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from .catalog import DATE_FIELDS, DEMO_CAMPAIGN_TABLES, META_TABLES, MONTHLY, PAGES
 from . import genie
-from .store import ACTIVE_CONNECTION, WORKSPACE_CONTRACT, ANALYTICS_MAPPING, USE_CASE_NAMES, APP_ROOT, DataError, Store, Viewer, identifier, normalize_json
+from .store import ACTIVE_CONNECTION, WORKSPACE_CONTRACT, ANALYTICS_MAPPING, APP_ROOT, DataError, Store, Viewer, identifier, normalize_json
 
 
 store = Store()
@@ -27,7 +27,8 @@ logger = logging.getLogger("marketing_app")
 
 class ConnectionSettings(BaseModel):
     model_config=ConfigDict(extra="forbid")
-    source_mode:Literal['gold','use_cases','both']='both'
+    # Accept old connection cookies; normalize them to Gold on the next request.
+    source_mode:Literal['gold','use_cases','both']='gold'
     gold_catalog: str = Field(default='',max_length=255)
     gold_schema: str = Field(default='',max_length=255)
     use_cases_catalog: str = Field(default='',max_length=255)
@@ -35,12 +36,13 @@ class ConnectionSettings(BaseModel):
 
     def profile(self):
         values={key:value.strip() for key,value in self.model_dump().items()}
-        active=(['gold_catalog','gold_schema'] if self.source_mode=='gold' else
-            ['use_cases_catalog','use_cases_schema'] if self.source_mode=='use_cases' else
-            ['gold_catalog','gold_schema','use_cases_catalog','use_cases_schema'])
+        active=['gold_catalog','gold_schema']
+        if self.source_mode=='use_cases':
+            for key in active:values[key]=values[key] or store._defaults[key]
         if any(not values[key] or "`" in values[key] or any(ord(c)<32 for c in values[key]) for key in active):
             raise DataError("Enter valid catalog and schema names.",400)
         for key in set(values)-set(active)-{'source_mode'}:values[key]=''
+        values['source_mode']='gold'
         return values
 
 
@@ -97,21 +99,6 @@ def query_filters(
 
 def table_catalog(user, layer="gold"):
     if not store.layer_enabled(layer):return []
-    if layer == "use_cases":
-        records = store.query(f"SELECT * FROM {store.table('use_case_dataset_catalog')}", {}, user)
-        rows = []
-        for record in records:
-            name = record["dataset_table"]
-            if name not in USE_CASE_NAMES: continue
-            grain = normalize_json(record["grain_columns"])
-            rows.append({"name":name,"kind":"mart","grain":", ".join(grain) if isinstance(grain,list) else str(grain),
-                "rows":record["published_row_count"],"note":record["metric_notes"],"sources":record["model_sources"],
-                "source_gold_table":record["source_gold_table"],"publication_id":record["publication_id"],
-                "location":store.source_label(name,"use_cases")})
-        rows.extend({"name":name,"kind":"metadata","grain":"Documented publication metadata grain","rows":None,
-            "note":"Use Cases delivery and business readiness metadata.","sources":"Use Cases publication",
-            "location":store.source_label(name,"use_cases")} for name in ["use_case_dataset_catalog","use_case_readiness"])
-        return sorted(rows,key=lambda row:row["name"])
     marts = store.query(f"SELECT * FROM {store.table('gold_mart_catalog')}", {}, user)
     entities = store.query(f"SELECT * FROM {store.table('gold_entity_catalog')}", {}, user)
     rows = []
@@ -149,9 +136,9 @@ def filter_sql(name, filters, user, layer=None):
             params[key] = value
         elif value:
             unsupported.append("period")
-    campaign_column = "campaign_key" if logical in DEMO_CAMPAIGN_TABLES else "resolved_campaign_key"
+    campaign_column = "campaign_key" if logical in DEMO_CAMPAIGN_TABLES or logical=='dim_campaign' else "resolved_campaign_key"
     mappings = {
-        "campaign": [campaign_column], "platform": ["platform", "source_channel"],
+        "campaign": [campaign_column], "platform": ["platform"],
         "product": ["product_id"], "market": ["market_id", "booking_market_id", "market_cd", "market_code"],
         "currency": ["currency", "cost_currency"], "plan": ["plan_version"],
     }
@@ -174,6 +161,10 @@ def filter_sql(name, filters, user, layer=None):
             continue
         else:
             unsupported.append(key)
+    blocked=sorted(set(unsupported)&{'campaign','platform'})
+    if blocked:
+        raise DataError('Unavailable for selected '+', '.join(blocked)+
+            ' filter: '+name+' has no corresponding key at its published Gold grain. Clear this filter to see its overall total.',400)
     # A single plan is always used when actuals repeat across plan versions.
     if "plan_version" in columns and not filters.get("plan"):
         plans = store.query(f"SELECT DISTINCT plan_version FROM {store.table(name,layer)} ORDER BY plan_version DESC", {}, user)
@@ -238,11 +229,38 @@ def runtime_config(user:Viewer=Depends(viewer)):
     return store.runtime_status()
 
 
+def campaign_options(records, warnings):
+    """Names are labels; enterprise keys remain the filter identity."""
+    groups={}
+    for row in records:
+        key=str(row['campaign_key']).strip()
+        if not key or key.lower() in {'unknown','null','none'}:continue
+        group=groups.setdefault(key,{'master':set(),'fallback':set()})
+        label=str(row.get('campaign_name') or '').strip()
+        if label.lower() not in {'','unknown','null','none',key.lower()}:
+            group['master' if row.get('master') else 'fallback'].add(label)
+    result=[]
+    for key,group in sorted(groups.items()):
+        names=group['master'] or group['fallback']
+        if len(names)==1:
+            name=next(iter(names))
+            if group['master'] and group['fallback']-names:
+                warnings.append('Gold campaign labels disagree with dim_campaign for '+key+'. The master name is displayed.')
+        elif names:
+            name='Conflicting campaign names ('+key+')'
+            warnings.append('Resolve conflicting Gold campaign names for '+key+'.')
+        else:
+            name='Name unavailable ('+key+')'
+            warnings.append('No valid Gold campaign name is available for '+key+'.')
+        result.append({'campaign_key':key,'campaign_name':name})
+    return sorted(result,key=lambda row:(row['campaign_name'].casefold(),row['campaign_key']))
+
+
 @app.get("/api/bootstrap")
 def bootstrap(user: Viewer = Depends(viewer)):
     catalog = table_catalog(user)
-    use_cases = table_catalog(user,"use_cases")
-    analytics= catalog if store.analytics_layer=='gold' else use_cases
+    use_cases = []
+    analytics = catalog
     available={row['name'] for row in analytics}
     warnings=[]
     def has(name):return store.location(name,store.analytics_layer)[2] in available
@@ -257,17 +275,18 @@ def bootstrap(user: Viewer = Depends(viewer)):
         if field not in columns:return []
         return [row["value"] for row in safe_query(
             f"SELECT DISTINCT {identifier(field)} AS value FROM {store.table(table)} WHERE {identifier(field)} IS NOT NULL ORDER BY {identifier(field)}")]
-    # Reference filters come from the selected analytics source; Use Cases never requires Gold dimensions.
-    campaigns={}
-    for source in ['mart_vendor_media_daily','mart_demo_campaign_economics','mart_new_funded_customers_monthly']:
+    # Resolve names from the conformed Gold master. ID-only rows never replace names.
+    campaign_records=[]
+    for source in ['dim_campaign','mart_vendor_media_daily','mart_demo_campaign_economics','mart_new_funded_customers_monthly']:
         if not has(source):continue
         try:columns={c['name'] for c in store.columns(source,user)}
         except DataError as error:warnings.append(str(error));continue
-        key='campaign_key' if source in DEMO_CAMPAIGN_TABLES else 'resolved_campaign_key'
+        key='campaign_key' if source in DEMO_CAMPAIGN_TABLES or source=='dim_campaign' else 'resolved_campaign_key'
         if key not in columns:continue
-        label=f"COALESCE(campaign_name, CAST({identifier(key)} AS STRING))" if 'campaign_name' in columns else f"CAST({identifier(key)} AS STRING)"
+        label='campaign_name' if 'campaign_name' in columns else 'campaign_title' if 'campaign_title' in columns else 'NULL'
         for row in safe_query(f"SELECT DISTINCT {identifier(key)} AS campaign_key, {label} AS campaign_name FROM {store.table(source)} WHERE {identifier(key)} IS NOT NULL"):
-            campaigns[row['campaign_key']]=row
+            campaign_records.append({**row,'master':source=='dim_campaign'})
+    campaigns=campaign_options(campaign_records,warnings)
     date_sources = " UNION ALL ".join(
         f"SELECT {identifier(field)} AS report_day FROM {store.table(table)}" for table, field in DATE_FIELDS.items() if table in ANALYTICS_MAPPING and has(table))
     date_rows=safe_query("SELECT MIN(report_day) AS start, MAX(report_day) AS end FROM ("+date_sources+") report_dates") if date_sources else []
@@ -279,8 +298,8 @@ def bootstrap(user: Viewer = Depends(viewer)):
             "analytics_layer":store.analytics_layer,"warnings":list(dict.fromkeys(warnings)),
             "analytics_catalog":store.catalog if store.analytics_layer=='gold' else store.use_cases_catalog,
             "analytics_schema":store.schema if store.analytics_layer=='gold' else store.use_cases_schema,"use_case_tables":use_cases,
-            "tables": catalog, "sources": coverage[0]["sources"] if coverage else None, "dates": dates, "campaigns": list(campaigns.values()),
-            "platforms": options(VENDOR_TABLE, "platform"),
+            "tables": catalog, "sources": coverage[0]["sources"] if coverage else None, "dates": dates, "campaigns": campaigns,
+            "platforms": sorted(set(options(VENDOR_TABLE, "platform")+options('mart_demo_paid_media_daily','platform'))),
             "products": options("mart_banking_funded_accounts_monthly", "product_id"), "markets": options("mart_banking_funded_accounts_monthly", "market_id"),
             "currencies": options(VENDOR_TABLE, "currency"), "plans": options("mart_sales_target_attainment_monthly", "plan_version"),
             "pages": [{"id": key, "title": value["title"], "subtitle": value["subtitle"]} for key, value in PAGES.items()]}
@@ -391,13 +410,7 @@ def export_csv(name: str, filters: dict = Depends(query_filters), user: Viewer =
 
 @app.get("/api/metadata/{kind}")
 def metadata(kind: str, user: Viewer = Depends(viewer)):
-    if kind=='lineage' and not store.layer_enabled('gold'):return []
-    if kind=='metrics' and not store.layer_enabled('gold'):
-        return [{'metric_id':page+'_'+str(i),'business_definition':metric.description,'formula':metric.expression,
-            'definition_source':'Application reporting reference; no Gold policy approval is implied.'}
-            for page,spec in PAGES.items() for i,metric in enumerate(spec['metrics'])]
-    tables={'lineage':'gold_source_coverage','metrics':'gold_kpi_dictionary',
-            'readiness':'use_case_readiness' if store.layer_enabled('use_cases') else 'gold_use_case_readiness'}
+    tables={'lineage':'gold_source_coverage','metrics':'gold_kpi_dictionary','readiness':'gold_use_case_readiness'}
     if kind not in tables:raise DataError('Unknown metadata view.',404)
     return [{key:normalize_json(value) for key,value in row.items()} for row in
             store.query(f'SELECT * FROM {store.table(tables[kind])} LIMIT 2000',{},user)]

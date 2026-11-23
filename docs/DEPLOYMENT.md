@@ -1,52 +1,23 @@
-# Deploy the explorer-aligned Marketing Intelligence app
+# Deploy the Gold-backed marketing app
 
-**Connection modes update:** You may now connect **Gold only**, **Use Cases only**, or **both**. See [independent sources and SQL authorization](SOURCE_CONNECTIONS.md). DATA_SOURCE_MODE in app.yaml sets the default; browser Connection Settings overrides it. Disabled sources are not queried. Smaller publications load with unsupported visuals clearly marked unavailable.
+1. Run Bronze -> Silver -> DQX pass rows into Model -> Gold. A separate Use Cases publisher is no longer part of this app's run order. Do not delete existing workspace tables merely to deploy the app.
+2. Extract the current `marketing-analytics-databricks.zip`. Select its root directory as the app source; it contains `app.yaml`, `requirements.txt`, `start.py` and the compiled UI.
+3. Attach your SQL warehouse with resource key `sql-warehouse` (CAN USE). `app.yaml` maps that resource to DATABRICKS_WAREHOUSE_ID. Databricks supplies DATABRICKS_HOST; schemeless workspace hostnames are accepted.
+4. Attach the desired Genie space with resource key `genie-space` (CAN RUN). Curate its datasets on Gold. Enable app user authorization scopes `sql` and `genie`; viewers must consent again after scope changes.
+5. Grant viewers app access, warehouse CAN USE and the required Gold USE CATALOG, USE SCHEMA and SELECT privileges. This app queries using each viewer's forwarded token; resource grants to its service principal alone do not grant viewer data access.
+6. Keep DATA_MODE=live. Configure GOLD_CATALOG/GOLD_SCHEMA in `app.yaml` (defaults `media-poc.gold`). No Use Cases environment variables or schema grants are required. Redeploy after changing code or resource bindings.
+7. In the app, Connection settings verifies the warehouse and Gold manifests and saves the selected Gold location in an HttpOnly browser cookie. Data permissions/columns are checked per visual; a successful manifest check does not certify every dataset or KPI.
 
-**Genie revision:** Follow [Genie setup](GENIE_SETUP.md) for automatic creation with warehouse + Genie resource attachments using `deploy.ps1`, or attach both resource keys manually in the UI. The current `app.yaml` references **genie-space** as well as **sql-warehouse**. Enable **sql** and **genie** user authorization scopes. The original SQL-only instructions below need these additions.
+The included `databricks.yml` and `deploy.ps1` can bind an existing warehouse and Genie space automatically during bundle deployment. See [Genie setup](GENIE_SETUP.md) for the CLI command and scope details.
 
-This package contains the app source and compiled frontend. No Databricks deployment or live account access has been performed by Codex.
+The uploaded Gold contract contains 29 marts, 78 entities and six metadata objects (113 total). A smaller Gold publication can connect when its Gold manifests are available; absent/inaccessible datasets produce unavailable visuals. The app does not create missing marts or fabricate values. All-schema browsing reads authorized column metadata in the selected catalog's Bronze, Silver, Model and Gold schemas; business records come from Gold only.
 
-## Prepare the workspace
+## Workspace acceptance
 
-The app is aligned to the uploaded explorer exports showing **113 Gold tables** and **30 Use Cases tables**, including metadata. All advanced visuals require the corresponding 29-mart contract. The separately supplied 17-mart Gold notebook supports fewer visuals; it can now connect in Gold-only mode with unsupported results marked unavailable. No missing business values are replaced with sample data in live mode.
+- Confirm business-page source labels and explorer data use the selected Gold namespace and the connection badge says Databricks Gold.
+- Check a known campaign shows its master name, and its enterprise key filters the appropriate marts. Unresolved native vendor spend can remain unattributed.
+- Reconcile each metric with its Gold table, date role, currency and reporting population. Campaign/platform selections must not preserve an unrelated overall total.
+- Run the read-only [campaign/grain audit](../notebooks/07_gold_campaign_filter_integrity_audit.py) against live Gold. Review missing names, duplicate keys and unresolved mappings separately.
+- Verify viewer permissions, Genie, warehouse response time, downloads and mobile layout. Local sample tests are not live workspace acceptance.
 
-Confirm the Gold and Use Cases notebooks completed successfully. Defaults are:
-
-| Purpose | Catalog | Schema |
-|---|---|---|
-| Marketing analytics | `source-data` | `usecases` |
-| Gold explorer, shared dimensions and definitions | `media-poc` | `gold` |
-| Source schema inspection | `media-poc` | `bronze`, `silver`, `model` |
-
-The Use Cases schema name from the export is **`usecases`**, with no underscore. The mapping in `dashboard-data-mapping.csv` records every dashboard input and its Gold reference.
-
-## Deploy
-
-1. Extract `marketing-analytics-databricks.zip` into a clean directory. Upload/sync the extracted contents to one Databricks Workspace folder. `app.yaml`, `start.py`, `requirements.txt` and `package.json` must be at the selected app source root.
-2. Create a Databricks App using this source folder.
-3. Add a SQL warehouse resource, using resource key **`sql-warehouse`** and **Can use** permission. The warehouse ID is supplied through `valueFrom` in `app.yaml`. See [Databricks SQL warehouse resources](https://docs.databricks.com/aws/en/dev-tools/databricks-apps/sql-warehouse).
-4. Attach your Genie space with resource key **genie-space** and **Can run** permission. Enable **User authorization** and add **sql** and **genie** scopes. Users consent when opening the app; queries use their forwarded user token and Unity Catalog permissions. See [Databricks authorization](https://docs.databricks.com/aws/en/dev-tools/databricks-apps/auth).
-5. Grant intended viewers app access, warehouse access, `USE CATALOG`, `USE SCHEMA` and `SELECT` on the required Gold/Use Cases tables. All schemas only displays the live column metadata visible to that identity. Bronze/Silver/Model record data is not queried by that metadata view.
-6. Keep `DATA_MODE=live`. The four catalog/schema defaults above are already in `app.yaml`; change them if your publication locations differ. Databricks supplies host and app port environment variables.
-7. Deploy and wait for the app build/start to finish. The app serves the React frontend and FastAPI API through `python start.py`.
-8. Open the app. Use the top-right **Connection settings** button to select compatible Gold and Use Cases catalogs/schemas. The same control appears on the initial connection-error screen when defaults cannot be opened.
-
-**Verify & connect** checks access to published manifests, the Use Cases datasets' recorded Gold locations, and the columns required by every dashboard. A successful selection is saved in a secure HttpOnly cookie for that browser. It changes no tables and grants no new permissions. The SQL warehouse remains the Databricks App resource, not a browser-supplied server. A different user/browser retains its own connection settings.
-
-## Accept the live app
-
-- Confirm business-page sources are `source-data.usecases.*` (or your verified selected namespace), and Gold explorer sources use the selected Gold namespace.
-- Reconcile each KPI and chart against the same Use Cases table and Gold snapshot, with identical filters and reporting populations.
-- Check publication IDs/readiness after a successful all-case pipeline run; avoid consuming partial multi-table publications.
-- Test a date range, campaign, platform, native currency and one sales-plan version. Validate a zero-denominator or empty result.
-- Open **Gold Data Explorer → Use case tables**, inspect column types and download filtered records. Then switch to **Gold tables** and inspect the Gold source independently.
-- Open **All schemas**. Live metadata comes from `information_schema.columns` under the selected Gold catalog's `bronze`, `silver`, `model` and configured Gold schemas, plus the selected Use Cases location. It is not the packaged CSV snapshot.
-- Verify a second user with different permissions, warehouse startup time, page response time and mobile layout.
-
-Live mode has no sample-data fallback. Missing grants, incompatible publications or failed warehouse requests display errors. The app does not create tables, views, quarantine storage or other Unity Catalog objects, so it adds no table slots to the Free Edition budget. Compute/runtime limits still apply.
-
-## Local sample review
-
-Create a Python environment, install `requirements-dev.txt`, run `npm.cmd ci` and `npm.cmd run build`, set `DATA_MODE=preview`, then run `python start.py`. Open `http://localhost:8000`.
-
-The included sample data is independently derived from the supplied synthetic source CSVs. It is not a download of live Gold/Use Cases contents. Temporary local SQLite views project the exported Use Cases column contract over those sample aggregates; ancillary attributes unavailable in the simplified fixture remain NULL. The app does not change live NULL handling. The All schemas reference preserves all 407 table definitions and 5,315 columns from the five uploaded explorer files. Live connection editing is disabled while in sample mode.
+Local preview is an independent synthetic CSV-derived SQLite fixture, not a downloaded Gold snapshot. Deployed live mode never falls back to it, and the app creates no new tables in any mode.

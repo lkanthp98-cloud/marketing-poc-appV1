@@ -50,15 +50,14 @@ def main():
         specs=[('metric',m.label,m.table,[m.expression],[]) for m in spec['metrics']]
         specs += [('chart',c.title,c.table,[m['expression'] for m in c.measures],c.dimensions) for c in spec['charts']]
         for kind,label,source,expressions,dimensions in specs:
-            assert source in mapping, (page,label,'No exported Use Cases table',source)
+            assert source in gold, (page,label,'No exported Gold table',source)
             fields=set(dimensions)
             for expression in expressions:
                 fields.update(re.findall(r'`([^`]+)`',expression))
                 if re.fullmatch(r'[a-z][a-z0-9_]*',expression):fields.add(expression)
-            target=mapping[source]
-            columns={c['name'] for c in use_cases[target]['columns']}
+            columns={c['name'] for c in gold[source]['columns']}
             if fields-columns:raise ValueError(f'{page}/{label}: unexported columns {fields-columns}')
-            reports.append([page,kind,label,'source-data.usecases.'+target,'media-poc.gold.'+source,', '.join(sorted(fields)),'SCHEMA_MATCH_NO_LIVE_VALUES_CHECKED'])
+            reports.append([page,kind,label,'media-poc.gold.'+source,'media-poc.gold.'+source,', '.join(sorted(fields)),'SCHEMA_MATCH_NO_LIVE_VALUES_CHECKED'])
     with (APP/'docs/dashboard-data-mapping.csv').open('w',encoding='utf-8-sig',newline='') as file:
         writer=csv.writer(file);writer.writerow(['page','element','title','analytics_input','gold_reference','required_columns','validation']);writer.writerows(reports)
     summary=defaultdict(lambda:[0,0])
@@ -66,7 +65,7 @@ def main():
         summary[(table['catalog'],table['schema'])][0]+=1
         summary[(table['catalog'],table['schema'])][1]+=len(table['columns'])
     print('Export inventory:',dict(summary))
-    print(f'Validated {len(reports)} dashboard elements against 28 Use Cases datasets; no data values or permissions were validated.')
+    print(f'Validated {len(reports)} dashboard elements against Gold datasets; no data values or permissions were validated.')
 
 
 if __name__=='__main__':main()

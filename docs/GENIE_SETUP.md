@@ -6,17 +6,17 @@ Live Genie uses the signed-in viewer's forwarded token, not a shared service-pri
 
 ## Prepare one Genie space
 
-Create or select a curated marketing Genie space in the same workspace as the app. Use the existing published datasets from `source-data.usecases`, with approved KPI definitions. Suggested starting datasets:
+Create or select a curated marketing Genie space in the same workspace as the app. Use the existing published datasets from `media-poc.gold`, with approved KPI definitions. Suggested starting datasets:
 
-- `uc02_vendor_media_daily`
-- `shared_demo_campaign_economics`
-- `uc06_new_funded_customers_monthly`
-- `uc09_sales_target_attainment_monthly`
-- `uc08_demo_three_source_cost_reconciliation`
-- `uc04_demo_experiment_variant`
-- `uc10_brand_survey_wave`
+- `mart_vendor_media_daily`
+- `mart_demo_campaign_economics`
+- `mart_new_funded_customers_monthly`
+- `mart_sales_target_attainment_monthly`
+- `mart_demo_three_source_cost_reconciliation`
+- `mart_demo_experiment_variant`
+- `mart_brand_survey_wave`
 
-Add further datasets as needed for your business questions. Avoid adding both a Gold mart and its Use Cases copy to the same analysis without a clear rule: they represent the same underlying activity. Put the relevant definitions from `GENIE_SPACE_INSTRUCTIONS.txt` into the space instructions. Its warehouse must be configured and viewers must have the necessary Genie, warehouse and table privileges.
+Add further datasets as needed for your business questions. Curate this space on Gold marts and conformed dimensions, including `dim_campaign` for campaign names. Do not add duplicate Use Cases publications. Put the relevant definitions from `GENIE_SPACE_INSTRUCTIONS.txt` into the space instructions. Its warehouse must be configured and viewers must have the necessary Genie, warehouse and table privileges.
 
 The Genie space owns its dataset selection and business instructions. Dashboard Connection Settings and filters do not reconfigure that space. Include the desired dates, currency and population in questions. Curating a space improves answers but does not certify generated SQL or causal conclusions; review the SQL and its result before business use.
 

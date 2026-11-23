@@ -1,6 +1,9 @@
 Suggested business context for the marketing Genie space. Review with the business owner.
 
-Use the curated Use Cases datasets. Keep native vendor delivery, synthetic paid cohorts,
+Use the curated Gold marts and dimensions. Resolve campaign names with dim_campaign;
+retain campaign keys for joins. Do not join the campaign master unless the key is unique.
+If a Gold grain lacks campaign or platform keys, report that limitation instead of
+returning an unfiltered overall total as a filtered result. Keep native vendor delivery, synthetic paid cohorts,
 banking acquisition and e-commerce populations separate. Do not join facts at different
 grains without preaggregation and a documented attribution/allocation rule.
 

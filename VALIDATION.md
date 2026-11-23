@@ -1,41 +1,28 @@
-# Local validation record
+# Gold-backed app validation - 23 November 2026
 
-Validated 22 November 2026 against the supplied synthetic source files and all five uploaded explorer CSV contracts. Live account access and deployment remain unverified.
+Validation uses the source-derived local sample and supplied explorer CSV contracts. No live Databricks query, deployment or financial acceptance was performed.
 
 | Check | Result |
 |---|---|
-| TypeScript strict compile and production Vite build | Passed |
-| Backend contract tests | 45 passed |
-| Host/resource regression | Scheme-less/HTTPS hosts, warehouse aliases, isolated errors, SQL/Genie transport and safe diagnostics passed |
+| Backend tests | 52 passed |
+| TypeScript and production Vite build | Passed |
 | Playwright browser scenarios | 7 passed |
-| Independent source modes | Gold-only, Use-Cases-only and both passed; disabled sources were not queried |
-| Separate single-source browser instances | Both Gold-only and Use-Cases-only loaded all six dashboards and their enabled explorer |
-| Permission diagnostics | Warehouse probe runs before any source verification; later failures name the selected layer |
-| Genie lifecycle/result parsing and conversation isolation | Mocked API checks passed; no live Genie calls |
-| Genie sample UI | Guided CSV-derived answers, SQL, results, tab navigation and reset passed |
-| Automatic attachment deployment helper | PowerShell syntax checked; authenticated bundle deployment pending |
-| Published object inventory in preview | 113: 29 marts + 78 entities + 6 metadata tables |
-| Gold table preview reads | All 113 successful |
-| Use Cases table preview reads | All 30 successful; 28 datasets and 2 metadata tables |
-| Schema export reference | 407 table definitions and 5,315 associated columns across 5 locations |
-| Dashboard source/column alignment | All 42 elements matched to exported Use Cases datasets |
-| Default analytics namespace | source-data.usecases |
-| Default Gold namespace | media-poc.gold |
-| Per-browser live connection and request/worker isolation | Mocked warehouse tests passed |
-| Source coverage | All 91 feeds represented |
-| Accepted source fixture rows | 68,372; 94 rows excluded by current DQ rules |
-| Browser pages | Six analytics pages + Gold Data Explorer |
-| Mobile | Navigation and page overflow checked at 390 × 844 |
-| Desktop | Charts and controls checked at 1440 × 1050 |
-| Warehouse adapter | Parameter binding, chunk parsing, failures, authorization and viewer cache isolation mocked |
-| Live workspace connection and deployment | Pending workspace execution |
+| Dashboard columns and expressions | All 42 elements checked against Gold export fields |
+| Business routing | All six report pages use Gold directly |
+| Use Cases isolation | No Use Cases queries, schema reads or export reads; explicit disabled-layer requests rejected |
+| Legacy profiles | Both/Use-Cases-only browser preferences migrate to Gold; old environment source modes cannot enable Use Cases |
+| Campaign names | Master labels preserved over ID-only rows; deterministic missing/conflict labels; master disagreements disclosed |
+| Campaign/platform filters | Exact source-key matching; incompatible grains marked unavailable; exports cannot return unfiltered totals |
+| Baseline measures | Unfiltered local spend, impressions, funding, contribution and experiment results preserved |
+| Gold reads | All 113 sample objects readable; 91 source coverage records |
+| Schema reference | Four active foundation locations: 377 definitions, 4,817 columns; historical fifth export retained in contract only |
+| Permissions/transport | Viewer authorization, binding, SQL API parameter/chunk/error handling and cache isolation checked with mocks |
+| Genie | Lifecycle, conversation isolation, sample answers, SQL/results and browser tab checked; no live Genie calls |
+| Audit notebook | Python syntax checked; Spark SQL audit execution pending in Databricks |
+| Physical table changes | None; app performs read-only analytics on existing Gold |
 
-The browser scenarios cover page navigation, charts, metric details, filters, saved views, empty states, both Gold and Use Cases discovery, schema, lineage, KPI definitions, pagination, CSV download, all-schema search and the connection dialog in sample mode. Desktop and mobile screenshots are included under `artifacts/`. A mocked live namespace test confirms business marts resolve to Use Cases, while Gold explorer data resolves to Gold. A separate mocked connection test validates browser-specific catalog/schema selection and worker-thread isolation. No test used a live Databricks warehouse.
+Browser checks cover all six reports, Gold explorer, metric details, campaign names, campaign/platform scope, date filtering, saved/reset filters, unavailable results, schema, lineage, dictionary, table pagination/search/export, Gold-only connection settings, mobile navigation and Genie. Screenshots from the current tests are in artifacts, including gold-campaign-platform-filters.png. Older use-cases-explorer.png is historical evidence of the previous version and is not the current UI.
 
-Visual review verified the experiment interval includes both bounds and crosses zero. The table displays its absolute lift and confidence bounds in percentage points, with a separate relative lift and four-decimal p-value.
+Known local test baselines: vendor USD delivery cost 790,179.109988; native impressions 56,797,673; native clicks 1,729,617; funded banking accounts 282; observed contribution proxy USD 105,265.94; experiment units 480 with 81 conversions. Fixture values are not fixed expected live outputs. Some ancillary sample fields are simplified.
 
-Verified fixture totals: vendor native USD cost 790,179.109988; impressions 56,797,673; reported clicks 1,729,617; funded banking accounts 282; synthetic banking net contribution 105,265.94 USD; experiment eligible units 480 and converted units 81.
-
-The preview is an independent local reproduction derived from source CSVs, not a workspace data export. Some source/model audit fields are simplified. Local Use Cases views project the exported column contract; ancillary fixture fields not available locally remain NULL. Successful local checks do not certify Spark execution, live mapping approvals, financial definitions or production runtime compatibility. Complete the workspace acceptance checks in `docs/DEPLOYMENT.md` after publishing compatible Gold and Use Cases outputs and configuring app authorization. The separately supplied 17-mart Gold notebook is a smaller contract than the 113-table explorer export used for this app.
-
-The production build emits a bundle-size advisory for the ECharts/React bundle (approximately 905 KB uncompressed, 300 KB gzipped). The build succeeds; initial-load performance should be measured in the workspace.
+The Vite build emits a bundle-size advisory (approximately 918 KB uncompressed / 304 KB gzipped). Build passes; initial-load and warehouse latency require workspace measurement. Local testing does not certify Spark execution, approved campaign crosswalks, actual Gold row integrity, Genie curation, quotas or business KPI approval. Run the read-only Gold audit and workspace acceptance checks after redeploying this version.

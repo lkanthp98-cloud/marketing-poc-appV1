@@ -82,40 +82,26 @@ test('mobile layout has usable navigation and no page overflow', async ({ page }
   await page.screenshot({ path: 'artifacts/mobile-acquisition.png', fullPage: true });
 });
 
-test('Use Cases data, all uploaded schemas and connection settings are discoverable', async ({ page }) => {
-  const errors: string[] = [];
-  page.on('pageerror', error => errors.push(error.message));
+test('Gold connection and foundation schemas are discoverable without Use Cases settings', async ({ page }) => {
   await page.goto('/');
   await page.getByRole('button', { name: 'Connection settings', exact: true }).click();
-  await expect(page.getByRole('dialog', { name: 'Live data connection' })).toBeVisible();
-  await expect(page.getByLabel('Use Cases catalog', { exact: true })).toHaveValue('source-data');
-  await expect(page.getByLabel('Use Cases schema', { exact: true })).toHaveValue('usecases');
-  await page.getByLabel('Data sources', { exact: true }).selectOption('gold');
-  await expect(page.getByLabel('Gold catalog', { exact: true })).toBeEnabled();
-  await expect(page.getByLabel('Use Cases catalog', { exact: true })).toBeDisabled();
-  await page.getByLabel('Data sources', { exact: true }).selectOption('use_cases');
-  await expect(page.getByLabel('Gold catalog', { exact: true })).toBeDisabled();
-  await expect(page.getByLabel('Use Cases catalog', { exact: true })).toBeEnabled();
-  await page.getByLabel('Data sources', { exact: true }).selectOption('both');
+  const dialog=page.getByRole('dialog', { name: 'Live data connection' });
+  await expect(dialog).toBeVisible();
+  await expect(page.getByLabel('Gold catalog', { exact: true })).toHaveValue('media-poc');
+  await expect(page.getByLabel('Gold schema', { exact: true })).toHaveValue('gold');
+  await expect(page.getByLabel('Use Cases catalog', { exact: true })).toHaveCount(0);
+  await expect(dialog).toContainText('directly from published Gold');
   await expect(page.getByRole('button', { name: 'Verify & connect' })).toBeDisabled();
   await page.keyboard.press('Escape');
   await page.getByRole('navigation').getByRole('button', { name: 'Gold Data Explorer' }).click();
-  await page.getByRole('button', { name: /Use case tables/ }).click();
-  await expect(page.locator('.explorer-summary')).toContainText('30');
-  await page.getByLabel('Search Use Case tables').fill('uc02_vendor_media_daily');
-  await page.locator('.catalog-item').click();
-  await page.getByRole('button', { name: 'Schema', exact: true }).click();
-  await expect(page.locator('.schema-table')).toContainText('_uc_publication_id');
-  await expect(page.locator('.entity-heading')).toContainText('source-data / usecases');
-  await page.screenshot({ path: 'artifacts/use-cases-explorer.png', fullPage: true });
+  await expect(page.getByRole('button', { name: /Use case tables/ })).toHaveCount(0);
   await page.getByRole('button', { name: 'All schemas', exact: true }).click();
-  await expect(page.locator('.schema-browser-controls')).toContainText('407 tables');
+  await expect(page.locator('.schema-browser-controls')).toContainText('377 tables');
   await page.getByLabel('Schema location').selectOption('media-poc.silver');
   await expect(page.locator('.schema-browser-controls')).toContainText('91 tables');
   await page.getByLabel('Search tables or columns').fill('spend');
   await expect(page.locator('.schema-table')).toBeVisible();
   await page.screenshot({ path: 'artifacts/all-schema-explorer.png', fullPage: true });
-  expect(errors).toEqual([]);
 });
 
 test('Genie tab answers guided sample questions with SQL and results', async ({ page }) => {
@@ -141,24 +127,23 @@ test('Genie tab answers guided sample questions with SQL and results', async ({ 
   expect(errors).toEqual([]);
 });
 
-test('single-source deployments load dashboards and disable the other explorer layer', async ({ page }) => {
-  test.skip(!process.env.SOURCE_MODE_GOLD_URL || !process.env.SOURCE_MODE_UC_URL, 'Start Gold-only and Use-Cases-only sample servers to run this check.');
-  for (const [url, inactive, prefix] of [
-    [process.env.SOURCE_MODE_GOLD_URL!, /Use case tables/, 'media-poc.gold.'],
-    [process.env.SOURCE_MODE_UC_URL!, /Gold tables/, 'source-data.usecases.'],
-  ] as const) {
-    await page.goto(url);
-    await expect(page.locator('.metric-card')).toHaveCount(4);
-    await expect(page.locator('.table-source')).toContainText(prefix);
-    for (const title of ['Campaign & Paid Media', 'Customer Acquisition', 'Digital & Offline', 'Financial Performance', 'Experiments & Brand']) {
-      await page.getByRole('navigation').getByRole('button', { name: title }).click();
-      await expect(page.locator('.chart-canvas')).toHaveCount(3);
-      await expect(page.locator('.error-card')).toHaveCount(0);
-      await expect(page.locator('.table-source')).toContainText(prefix);
-    }
-    await page.getByRole('navigation').getByRole('button', { name: 'Gold Data Explorer' }).click();
-    await expect(page.getByRole('button', { name: inactive })).toBeDisabled();
-    await page.getByRole('button', { name: 'Schema', exact: true }).click();
-    await expect(page.locator('.schema-table tbody tr').first()).toBeVisible();
-  }
+test('campaign names and platform filters preserve Gold identity and explain unsupported grains', async ({ page }) => {
+  await page.goto('/');
+  const campaign=page.getByLabel('Campaign', { exact: true });
+  await expect(campaign.locator('option[value="CMP001"]')).toHaveText('Everyday Checking - Regional Acquisition');
+  await expect(campaign.locator('option[value="CMP006"]')).toHaveText('Small Business Banking Growth');
+  await campaign.selectOption('CMP001');
+  await page.getByLabel('Platform', { exact: true }).selectOption('meta');
+  await expect(page.locator('.metric-card').nth(2)).toContainText('Unavailable for this selection');
+  await page.getByRole('button', { name: 'Details for Funded accounts' }).click();
+  await expect(page.getByRole('dialog')).toContainText('published Gold grain');
+  await page.keyboard.press('Escape');
+  await expect(page.locator('.chart-empty').last()).toContainText('campaign');
+  await page.screenshot({ path: 'artifacts/gold-campaign-platform-filters.png', fullPage: true });
+  const response=await page.request.get('/api/dashboard/overview?campaign=CMP001&platform=meta');
+  const data=await response.json();
+  expect(data.metrics.every((m: {source: string}) => m.source.startsWith('media-poc.gold.'))).toBe(true);
+  expect(data.metrics[2].value).toBeNull();
+  await page.getByRole('button', { name: 'Reset', exact: true }).click();
+  await expect(page.locator('.metric-value').nth(2)).toHaveText('282');
 });
