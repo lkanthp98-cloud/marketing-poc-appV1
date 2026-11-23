@@ -34,8 +34,8 @@ def authorize(user,conversation,key):
 
 
 def request(store,user,path,body=None):
+    if not user.token:raise DataError('Ask Genie uses user authorization independently of dashboard SQL mode. Enable sql and genie user scopes and sign in with consent.',401)
     store.validate_runtime(require_warehouse=False)
-    if not user.token:raise DataError('Configure Databricks user authorization with sql and genie scopes.',401)
     req=urllib.request.Request(store.host+'/api/2.0/genie/spaces/'+space()+path,
         data=json.dumps(body).encode() if body is not None else None,
         headers={'Authorization':'Bearer '+user.token,'Content-Type':'application/json'})

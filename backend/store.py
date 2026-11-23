@@ -1,4 +1,4 @@
-"""Read-only SQL access with isolated preview data and viewer-scoped live queries."""
+"""Read-only SQL access with explicit app or user OAuth and isolated preview data."""
 
 import gzip
 import hashlib
@@ -15,6 +15,7 @@ from urllib.parse import urlsplit
 from dataclasses import dataclass
 from contextvars import ContextVar
 from pathlib import Path
+from .catalog import PAGES, DATE_FIELDS, META_TABLES
 
 
 APP_ROOT = Path(__file__).resolve().parents[1]
@@ -24,6 +25,11 @@ ANALYTICS_MAPPING = WORKSPACE_CONTRACT["analytics_mapping"]
 ACTIVE_CONNECTION = ContextVar("marketing_connection", default={})
 USE_CASE_NAMES = {spec["name"] for spec in WORKSPACE_CONTRACT["tables"].values()
                   if (spec["catalog"], spec["schema"]) == ("source-data", "usecases")}
+APP_TABLES = ({m.table for p in PAGES.values() for m in p['metrics']} |
+              {c.table for p in PAGES.values() for c in p['charts']} |
+              {p['table'] for p in PAGES.values()} |
+              (set(DATE_FIELDS) & set(ANALYTICS_MAPPING)) |
+              {'mart_demo_paid_media_daily', 'dim_campaign'} | META_TABLES)
 
 
 class DataError(Exception):
@@ -112,13 +118,26 @@ class Store:
         self.warehouse=os.getenv(self.warehouse_env,'').strip() if self.warehouse_env else ''
         self._schema_cache = {}
         self._lock = threading.Lock()
+        self.sql_auth_mode=os.getenv('SQL_AUTH_MODE','user').strip().lower()
+        if self.sql_auth_mode not in {'app','user'}:
+            raise RuntimeError('SQL_AUTH_MODE must be app or user; identities never switch automatically.')
+        self._app_config=None
+        self._auth_lock=threading.Lock()
         # Use-case pages are application projections of Gold, never a second publication.
         self.default_source_mode='gold'
 
     @property
-    def catalog(self):return ACTIVE_CONNECTION.get().get("gold_catalog",self._defaults["gold_catalog"])
+    def catalog(self):return self._defaults['gold_catalog'] if self.shared_data else ACTIVE_CONNECTION.get().get("gold_catalog",self._defaults["gold_catalog"])
     @property
-    def schema(self):return ACTIVE_CONNECTION.get().get("gold_schema",self._defaults["gold_schema"])
+    def schema(self):return self._defaults['gold_schema'] if self.shared_data else ACTIVE_CONNECTION.get().get("gold_schema",self._defaults["gold_schema"])
+
+    @property
+    def shared_data(self):return self.mode=='live' and self.sql_auth_mode=='app'
+
+    def validate_connection(self,profile):
+        if self.shared_data and any(profile[key].casefold()!=self._defaults[key].casefold() for key in ['gold_catalog','gold_schema']):
+            raise DataError('App-identity access is bound to the configured '+self.catalog+'.'+self.schema+
+                '. Change the deployment settings to use another schema.',400)
     @property
     def use_cases_catalog(self):return ACTIVE_CONNECTION.get().get("use_cases_catalog",self._defaults["use_cases_catalog"])
     @property
@@ -144,6 +163,8 @@ class Store:
         if layer not in {"gold", "use_cases"}:
             raise DataError("Choose the Gold data source.", 400)
         if not self.layer_enabled(layer):raise DataError(f'The {layer} source is disabled in this connection.',400)
+        if self.shared_data and name not in APP_TABLES:
+            raise DataError('This table is outside the configured 30-table app dataset.',404)
         return self.catalog, self.schema, name
 
     def table(self, name, layer=None):
@@ -163,7 +184,10 @@ class Store:
         return ".".join(self.location(name, layer))
 
     def runtime_status(self):
-        return {'build':'2026-11-23-app-gold-subset','mode':self.mode,'source_mode':self.source_mode,
+        return {'build':'2026-11-23-explicit-app-oauth','mode':self.mode,'source_mode':self.source_mode,
+            'sql_auth_mode':self.sql_auth_mode,'shared_app_dataset':self.shared_data,
+            'app_client_id_present':bool(os.getenv('DATABRICKS_CLIENT_ID','').strip()),
+            'app_client_secret_present':bool(os.getenv('DATABRICKS_CLIENT_SECRET','').strip()),
             'workspace_host_present':self._host_present,'workspace_host_valid':bool(self.host),
             'warehouse_id_present':bool(self.warehouse),'warehouse_environment_variable':self.warehouse_env or None,
             'expected_warehouse_resource_key':'sql-warehouse','genie_space_present':bool(os.getenv('GENIE_SPACE_ID','').strip())}
@@ -176,23 +200,58 @@ class Store:
         if require_warehouse and not self.warehouse:
             raise DataError('The warehouse ID was not injected into the running app. The attached warehouse resource key must match app.yaml valueFrom: sql-warehouse, mapped to DATABRICKS_WAREHOUSE_ID. Redeploy the app after changing Resources or app.yaml.')
 
+    def _app_headers(self):
+        client_id=os.getenv('DATABRICKS_CLIENT_ID','').strip()
+        secret=os.getenv('DATABRICKS_CLIENT_SECRET','').strip()
+        if not client_id or not secret:
+            raise DataError('App OAuth credentials were not injected. Redeploy in Databricks Apps; '
+                'the platform supplies the app service-principal credentials. No personal token is needed.')
+        try:
+            with self._auth_lock:
+                if self._app_config is None:
+                    from databricks.sdk.core import Config
+                    # Explicit OAuth M2M prevents local profiles or PATs choosing another identity.
+                    self._app_config=Config(host=self.host,client_id=client_id,client_secret=secret,auth_type='oauth-m2m')
+                return self._app_config.authenticate()
+        except Exception:
+            raise DataError('App OAuth authentication failed. Check the Databricks-managed app credentials '
+                'and workspace host, then redeploy. The viewer token was not used as a fallback.') from None
+
+    def _error_detail(self,error,*tokens):
+        try:
+            detail=json.loads(error.read(8192))
+            message=str(detail.get('error_code','UNKNOWN'))+': '+str(detail.get('message',''))
+        except (ValueError,AttributeError,OSError):return ''
+        finally:error.close()
+        for value in [*tokens,os.getenv('DATABRICKS_CLIENT_SECRET',''),os.getenv('DATABRICKS_TOKEN','')]:
+            if value:message=message.replace(value,'[redacted]')
+        message=re.sub(r'(?i)Bearer\s+[^\s\"<>]+','Bearer [redacted]',message)
+        return ' Databricks detail: '+message[:720]
+
     def _request(self, path, token, body=None):
         self.validate_runtime()
-        if not token:
-            raise DataError("Enable Databricks user authorization with the SQL scope and reopen the app.", 401)
         if not path.startswith("/api/2.0/sql/statements"):
             raise DataError("Invalid warehouse response path.")
+        if self.sql_auth_mode=='app':auth=self._app_headers()
+        elif token:auth={'Authorization':'Bearer '+token}
+        else:raise DataError('User SQL mode requires the forwarded user token and sql user-authorization scope.',401)
         payload = json.dumps(body).encode() if body is not None else None
         request = urllib.request.Request(self.host + path, data=payload, headers={
-            "Authorization": "Bearer " + token, "Content-Type": "application/json",
+            **auth, "Content-Type": "application/json",
         })
         try:
             with urllib.request.urlopen(request, timeout=25) as response:
                 return json.load(response)
         except urllib.error.HTTPError as error:
+            detail=self._error_detail(error,token,auth.get('Authorization',auth.get('authorization','')).removeprefix('Bearer '))
             if error.code in {401, 403}:
-                raise DataError(f'Databricks SQL API rejected this request (HTTP {error.code}). Enable the sql user-authorization scope and consent again; the signed-in user also needs CAN USE on the attached warehouse. An app service-principal resource grant alone does not grant the viewer access.',error.code) from error
-            raise DataError("The warehouse could not complete this request. Check the Gold publication and warehouse status.") from error
+                guidance=('App SQL mode: grant the app service principal CAN USE on the attached warehouse and '
+                    'USE CATALOG, USE SCHEMA and SELECT on the configured app dataset. See docs/APP_IDENTITY_SETUP.md.'
+                    if self.sql_auth_mode=='app' else
+                    'User SQL mode: enable the sql user scope and consent again; the viewer needs CAN USE on '
+                    'the warehouse and access to the selected tables. The app identity is not used as a fallback.')
+                raise DataError(f'Databricks SQL API rejected this request (HTTP {error.code}). '+guidance+detail,error.code) from None
+            raise DataError(f'Databricks SQL API request failed (HTTP {error.code}).'+detail) from None
         except (OSError, ValueError) as error:
             raise DataError("The SQL warehouse is unavailable. Retry after checking its status.") from error
 
@@ -251,7 +310,7 @@ class Store:
 
     def columns(self, name, viewer, layer=None):
         catalog_name, schema_name, physical_name = self.location(name, layer)
-        key = (viewer.cache_key, catalog_name, schema_name, physical_name)
+        key = (self.sql_auth_mode, viewer.cache_key, catalog_name, schema_name, physical_name)
         with self._lock:
             cached = self._schema_cache.get(key)
             if cached and cached[0] > time.monotonic():

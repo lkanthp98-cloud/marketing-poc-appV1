@@ -1,5 +1,7 @@
 # Host and attached-warehouse runtime fix
 
+For the pre-source warehouse HTTP 403, see [app identity setup](APP_IDENTITY_SETUP.md). The updated deployment explicitly uses the managed app principal for dashboard SQL; the attached warehouse grant and schema grants must apply to that same identity. User SQL mode remains optional and does not fall back to app identity.
+
 The old error, `Configure DATABRICKS_HOST and the sql-warehouse app resource`, combined two separate checks. It could appear even when the warehouse was correctly attached, because the original code required the host string to start with `https://`.
 
 Databricks' [official Apps example](https://docs.databricks.com/aws/en/dev-tools/databricks-apps/vector-search) explicitly handles DATABRICKS_HOST values without a scheme. This package now adds HTTPS to a bare workspace hostname and trims surrounding whitespace/trailing slashes. Both SQL and Genie use the normalized host. Missing and invalid host values, and missing warehouse IDs, have distinct messages. Explicit insecure HTTP URLs are not silently accepted.
@@ -17,7 +19,7 @@ The canonical warehouse variable is DATABRICKS_WAREHOUSE_ID. For compatibility w
 
 ## Safe diagnostics
 
-Open `/api/runtime-config` on the deployed app while signed in. It reports only configuration presence, binding variable names, mode and build identifier **2026-11-23-app-gold-subset**. It never returns hostnames, resource IDs, user tokens, client secrets or the full environment.
+Open `/api/runtime-config` on the deployed app. It reports configuration/credential-presence booleans, binding variable names, SQL mode and build identifier **2026-11-23-explicit-app-oauth**. It never returns hostnames, resource IDs, user tokens, client secrets or the full environment.
 
 If `workspace_host_valid` and `warehouse_id_present` are both true, runtime binding checks have passed. Subsequent errors can concern authorization, warehouse readiness, tables or schemas and should be handled using their specific messages. This endpoint does not claim live query success.
 

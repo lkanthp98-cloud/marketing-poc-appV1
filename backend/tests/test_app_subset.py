@@ -4,6 +4,7 @@ import importlib.util
 import json
 import re
 import sqlite3
+import threading
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -103,6 +104,7 @@ class SubsetContractTests(unittest.TestCase):
 
 class SubsetAppTests(unittest.TestCase):
     def setUp(self):
+        self.query_lock=threading.RLock()
         self.conn=sqlite3.connect(':memory:',check_same_thread=False);self.conn.row_factory=sqlite3.Row
         self.conn.execute('ATTACH DATABASE ? AS original',(str(preview_database()),))
         for name in publisher.DATA_TABLES:
@@ -123,12 +125,17 @@ class SubsetAppTests(unittest.TestCase):
     def tearDown(self):self.conn.close()
 
     def warehouse(self,sql,params,user):
+        with self.query_lock:return self._warehouse_read(sql,params,user)
+
+    def _warehouse_read(self,sql,params,user):
         self.queries.append(sql)
         if '.information_schema.columns ' in sql:
             if 'column_name AS name' in sql:
                 self.assertEqual(params['schema'],'app_gold')
                 return [{'name':r['name'],'type':r['type']} for r in self.conn.execute('PRAGMA table_info('+identifier(params['name'])+')')]
-            self.assertEqual(set(params.values()),{'app_gold'})
+            self.assertEqual(params['schema0'],'app_gold')
+            if store.shared_data:self.assertEqual({v for k,v in params.items() if k.startswith('table')},set(publisher.TABLES))
+            else:self.assertEqual(set(params.values()),{'app_gold'})
             return [{'table_catalog':'source-data','table_schema':'app_gold','table_name':n,
                      'column_name':r['name'],'full_data_type':r['type']} for n in publisher.TABLES
                     for r in self.conn.execute('PRAGMA table_info('+identifier(n)+')')]

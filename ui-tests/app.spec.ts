@@ -147,3 +147,27 @@ test('campaign names and platform filters preserve Gold identity and explain uns
   await page.getByRole('button', { name: 'Reset', exact: true }).click();
   await expect(page.locator('.metric-value').nth(2)).toHaveText('282');
 });
+
+test('shared app access is explicit and the configured namespace is read-only', async ({ page }) => {
+  await page.route('**/api/bootstrap',async route => {
+    const response=await route.fetch();const body=await response.json();
+    await route.fulfill({json:{...body,mode:'live',sql_auth_mode:'app',shared_data:true,
+      catalog:'source-data',schema:'app_gold',analytics_catalog:'source-data',analytics_schema:'app_gold'}});
+  });
+  await page.route('**/api/connection',async route => {
+    await route.fulfill({json:{mode:'live',sql_auth_mode:'app',shared_data:true,connection:{
+      source_mode:'gold',gold_catalog:'source-data',gold_schema:'app_gold',use_cases_catalog:'',use_cases_schema:''}}});
+  });
+  await page.goto('/');
+  await expect(page.locator('.workspace-identity')).toContainText('Shared app identity');
+  await expect(page.locator('.population-note').first()).toContainText('Shared app dataset');
+  await page.getByRole('button',{name:'Connection settings',exact:true}).click();
+  const dialog=page.getByRole('dialog',{name:'Live data connection'});
+  await expect(dialog).toContainText('Shared app access');
+  await expect(page.getByLabel('Gold catalog',{exact:true})).toHaveValue('source-data');
+  await expect(page.getByLabel('Gold catalog',{exact:true})).toHaveAttribute('readonly','');
+  await expect(page.getByLabel('Gold schema',{exact:true})).toHaveValue('app_gold');
+  await expect(page.getByLabel('Gold schema',{exact:true})).toHaveAttribute('readonly','');
+  await expect(page.getByRole('button',{name:'Verify & connect',exact:true})).toBeEnabled();
+  await page.screenshot({path:'artifacts/app-identity-connection.png',fullPage:false});
+});

@@ -4,9 +4,9 @@ Validation uses the source-derived local sample and supplied explorer CSV contra
 
 | Check | Result |
 |---|---|
-| Backend tests | 61 passed |
+| Backend tests | 71 passed |
 | TypeScript and production Vite build | Passed |
-| Playwright browser scenarios | 7 passed |
+| Playwright browser scenarios | 8 passed |
 | Dashboard columns and expressions | All 42 elements checked against Gold export fields |
 | Business routing | All six report pages use Gold directly |
 | Use Cases isolation | No Use Cases queries, schema reads or export reads; explicit disabled-layer requests rejected |
@@ -16,7 +16,9 @@ Validation uses the source-derived local sample and supplied explorer CSV contra
 | Baseline measures | Unfiltered local spend, impressions, funding, contribution and experiment results preserved |
 | Gold reads | All 113 sample objects readable; 91 source coverage records |
 | Schema reference | Four active foundation locations: 377 definitions, 4,817 columns; historical fifth export retained in contract only |
-| Permissions/transport | Viewer authorization, binding, SQL API parameter/chunk/error handling and cache isolation checked with mocks |
+| Permissions/transport | Explicit app/user SQL modes, OAuth M2M header selection, no identity fallback, token redaction and viewer/auth/namespace cache isolation checked with mocks |
+| Shared app boundary | Configured source-data.app_gold and 30-table allowlist enforced server-side; stale cookies ignored; cross-schema POST rejected |
+| Owner grant helper | Existing principal discovery, exact 30-table verification and only three read grants checked with mocks |
 | Genie | Lifecycle, conversation isolation, sample answers, SQL/results and browser tab checked; no live Genie calls |
 | Audit notebook | Python syntax checked; Spark SQL audit execution pending in Databricks |
 | App publisher | Exact 30-table contract, narrowed lineage/readiness, capacity and overwrite guards checked locally |
@@ -31,3 +33,5 @@ Known local test baselines: vendor USD delivery cost 790,179.109988; native impr
 The Vite build emits a bundle-size advisory (approximately 918 KB uncompressed / 304 KB gzipped). Build passes; initial-load and warehouse latency require workspace measurement. Local testing does not certify Spark execution, approved campaign crosswalks, actual Gold row integrity, Genie curation, quotas or business KPI approval. Run the read-only Gold audit and workspace acceptance checks after redeploying this version.
 
 The publisher was checked with source-derived metadata and a simulated live SQLite namespace. Its generated IPYNB cells compile. Spark CTAS, Delta time travel, EXCEPT ALL, target grants and quota enforcement still require Databricks validation. The refresh is sequential; keep Gold writers and the app paused until the publisher reports success. Local preview still uses the original 113-table fixture; the separate app_gold integration test verifies only the 30 selected objects.
+
+The default deployment now sets SQL_AUTH_MODE=app. Approved app users share the configured dataset; per-user policies require the optional user mode. App OAuth tests use the installed Databricks SDK with a mocked credential provider and HTTP transport, not a live token exchange. The browser shared-mode scenario uses mocked live connection metadata and checks the explicit access notice and read-only namespace fields. No live grants or deployment were executed.

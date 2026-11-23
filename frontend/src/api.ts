@@ -6,6 +6,7 @@ export type Filters = { start: string; end: string; campaign: string; platform: 
 export type TableInfo = { name: string; kind: string; grain: string; rows: number | null; note: string; sources: string; location: string };
 export type Bootstrap = {
   mode: string; viewer: string; catalog: string; schema: string; tables: TableInfo[]; sources: number | null;
+  sql_auth_mode: 'app' | 'user'; shared_data: boolean;
   source_mode: 'gold' | 'use_cases' | 'both'; enabled_sources: DataLayer[]; analytics_layer: DataLayer; warnings: string[];
   analytics_catalog: string; analytics_schema: string; use_case_tables: TableInfo[];
   dates: { start: string; end: string }; campaigns: { campaign_key: string; campaign_name: string }[];

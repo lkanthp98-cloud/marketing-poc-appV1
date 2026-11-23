@@ -4,7 +4,7 @@ All business pages build use-case analytics on **Gold**. For the dedicated app b
 
 The publisher creates **30 additional managed Delta tables** on the first run, so capacity must be available. It checks capacity, pins source versions, narrows metadata references and reconciles exact rows/types. It leaves source Gold unchanged and refreshes only its own destination tables. The app itself remains read-only. See [publication instructions and quota limitations](docs/APP_GOLD_SUBSET.md). This is not a confirmed fix for the separately reported telemetry error.
 
-React and ECharts provide six business pages, a Gold Data Explorer and Ask Genie. FastAPI queries Databricks SQL using the signed-in viewer's authorization. Campaign selectors show Gold master names while retaining campaign keys for filtering. Campaign/platform selections never silently return an unrelated overall total: unsupported Gold grains are explicitly unavailable.
+React and ECharts provide six business pages, a Gold Data Explorer and Ask Genie. Deployment now explicitly uses **SQL_AUTH_MODE=app**: dashboard SQL authenticates as the Databricks-managed app service principal. Approved app users share the configured 30-table dataset; the catalog/schema and table allowlist are fixed server-side. Set SQL_AUTH_MODE=user for individual Unity Catalog policies. Identities never switch automatically after a failed request. Campaign selectors show Gold master names while retaining campaign keys for filtering.
 
 | Page | Supported analysis |
 |---|---|
@@ -27,9 +27,9 @@ The included read-only `data/preview.db.gz` is independently derived from synthe
 
 ## Deploy
 
-Follow [deployment](docs/DEPLOYMENT.md). Attach warehouse key `sql-warehouse` and Genie key `genie-space`; enable `sql`/`genie` user authorization. `app.yaml` binds resource IDs through valueFrom and sets DATA_MODE=live. Databricks supplies the workspace host. Viewers need warehouse CAN USE plus the required Gold catalog/schema/table privileges. The app uses the forwarded viewer token and never silently falls back to the app service principal or sample data.
+Follow [app identity setup](docs/APP_IDENTITY_SETUP.md) and [deployment](docs/DEPLOYMENT.md). Keep warehouse key `sql-warehouse`. Grant the existing app principal USE CATALOG, USE SCHEMA and SELECT on `source-data.app_gold` using [the three setup statements](docs/grant_app_gold_read_access.sql). Databricks supplies its OAuth credentials automatically; no personal token is required. No tables are created by these grants. Ask Genie remains independently user-authorized and needs its `sql`/`genie` scopes, consent and space/table privileges.
 
-`databricks.yml` and `deploy.ps1` attach existing resource IDs during bundle deployment. [Genie setup](docs/GENIE_SETUP.md) describes curation and attachment. Connection settings now asks only for Gold catalog/schema. Old source profiles migrate to Gold; verify the selected location after upgrading. Genie space datasets remain separately managed and must also be curated on Gold.
+`databricks.yml` and `deploy.ps1` attach existing resource IDs during bundle deployment. The script also runs the owner-authorized dataset grant helper before starting the app. In app SQL mode, Connection settings displays the deployment's fixed Gold location and explains shared access; old browser namespace preferences are ignored. User SQL mode retains per-browser locations and viewer permissions. [Genie setup](docs/GENIE_SETUP.md) describes its separate curation and attachment.
 
 ## Reporting integrity
 

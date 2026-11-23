@@ -2,7 +2,7 @@
 
 The current app reads business data from one selected Gold catalog/schema. The six report pages implement supported analyses for UC01-UC10 using the existing Gold marts. No separate `use_cases`/`usecases` schema, physical use-case tables or quarantine tables are required by the app. SQL results are aggregated in read-only queries at request time; the app creates no Unity Catalog objects.
 
-Connection settings contains only **Gold catalog** and **Gold schema**. Deployment defaults to `source-data.app_gold` after running the [subset publisher](APP_GOLD_SUBSET.md); local preview retains the original Gold namespace. The publisher creates 30 additional managed tables; app queries remain read-only. Existing browser preferences must be changed in Connection settings to use app_gold. Legacy DATA_SOURCE_MODE values cannot reactivate Use Cases reads. The warehouse and Genie resource bindings remain deployment settings.
+Connection settings displays only **Gold catalog** and **Gold schema**. Deployment defaults to `source-data.app_gold` with SQL_AUTH_MODE=app. This uses the app principal, fixes the namespace and 30-table allowlist in server configuration, and ignores browser location cookies. All approved app users share that dataset; user-specific policies require SQL_AUTH_MODE=user. Legacy DATA_SOURCE_MODE values cannot reactivate Use Cases reads. No identity switches happen automatically. Local preview retains the original source-derived Gold fixture.
 
 Campaign labels come first from `gold.dim_campaign`; usable names in Gold marts provide a fallback if the master is unavailable. Missing names and conflicting names are explicit and appear in bootstrap warnings. An ID-only mart row never replaces a real name. Filter values remain enterprise keys, not campaign-name strings. Native vendor campaigns without approved enterprise mappings are not force-matched by name.
 
@@ -10,6 +10,6 @@ Campaign and platform filters apply only where the Gold dataset contains the cor
 
 Run `notebooks/07_gold_campaign_filter_integrity_audit.py` in Databricks to inspect actual master keys, names, mart mappings and grains. It reads Gold and displays reports without saving tables. Local fixture tests cannot establish the integrity of live Gold rows.
 
-Attaching a SQL warehouse grants the app identity its configured resource permission. This application queries as the signed-in viewer. A viewer needs the `sql` user-authorization scope, consent, CAN USE on the warehouse, USE CATALOG, USE SCHEMA and SELECT on the required Gold objects. See [runtime troubleshooting](RUNTIME_TROUBLESHOOTING.md). Failed live requests never fall back to local sample data.
+Attaching a SQL warehouse grants the app identity its configured resource permission. In app mode, grant that same principal USE CATALOG, USE SCHEMA and SELECT on the dedicated dataset. [App identity setup](APP_IDENTITY_SETUP.md) includes three SQL grants and an automatic owner helper. In user mode, each viewer instead needs SQL consent/scope, warehouse CAN USE and the intended data privileges. Failed live requests never fall back to another identity or sample data.
 
 Ask Genie remains attached to its independently curated space. Update that space to use Gold as described in [Genie setup](GENIE_SETUP.md); changing dashboard connection settings does not alter a Genie space.

@@ -17,7 +17,7 @@ from pydantic import BaseModel, ConfigDict, Field
 
 from .catalog import DATE_FIELDS, DEMO_CAMPAIGN_TABLES, META_TABLES, MONTHLY, PAGES
 from . import genie
-from .store import ACTIVE_CONNECTION, WORKSPACE_CONTRACT, ANALYTICS_MAPPING, APP_ROOT, DataError, Store, Viewer, identifier, normalize_json
+from .store import ACTIVE_CONNECTION, WORKSPACE_CONTRACT, ANALYTICS_MAPPING, APP_TABLES, APP_ROOT, DataError, Store, Viewer, identifier, normalize_json
 
 
 store = Store()
@@ -55,7 +55,7 @@ async def data_error(request, error):
 async def security_headers(request, call_next):
     profile={}
     cookie=request.cookies.get("marketing_connection")
-    if cookie and store.mode=="live":
+    if cookie and store.mode=="live" and not store.shared_data:
         try:profile=ConnectionSettings.model_validate_json(cookie).profile()
         except Exception:return JSONResponse(status_code=400,content={"detail":"The saved connection is invalid. Clear this site's connection cookie and retry."})
     context_token=ACTIVE_CONNECTION.set(profile)
@@ -72,9 +72,9 @@ def viewer(request: Request):
     if store.mode == "preview":
         return Viewer()
     token = request.headers.get("x-forwarded-access-token", "")
-    if not token:
+    if not token and not store.shared_data:
         raise DataError("Sign in through Databricks Apps and enable user authorization with the SQL scope.", 401)
-    return Viewer(token, request.headers.get("x-forwarded-email", "Databricks viewer"))
+    return Viewer(token, request.headers.get("x-forwarded-email", "App viewer" if store.shared_data else "Databricks viewer"))
 
 
 def query_filters(
@@ -103,10 +103,12 @@ def table_catalog(user, layer="gold"):
     entities = store.query(f"SELECT * FROM {store.table('gold_entity_catalog')}", {}, user)
     rows = []
     for row in marts:
+        if store.shared_data and row['mart_table'] not in APP_TABLES:continue
         rows.append({"name": row["mart_table"], "kind": "mart", "grain": row["grain_columns"],
                      "rows": row["row_count"], "note": row["metric_notes"], "sources": row["model_sources"]})
     for row in entities:
         name = row["gold_table"]
+        if store.shared_data and name not in APP_TABLES:continue
         kind = "dimension" if name.startswith("dim_") else "fact" if name.startswith("fact_") else "reference"
         rows.append({"name": name, "kind": kind, "grain": row["grain_columns"],
                      "rows": row["row_count"], "note": row["note"], "sources": row["model_table"]})
@@ -294,6 +296,7 @@ def bootstrap(user: Viewer = Depends(viewer)):
     dates={key:(str(value)[:10] if value else '') for key,value in dates.items()}
     coverage=safe_query(f"SELECT COUNT(*) AS sources FROM {store.table('gold_source_coverage','gold')}") if store.layer_enabled('gold') else []
     return {"mode": store.mode, "viewer": user.label, "catalog": store.catalog, "schema": store.schema,
+            "sql_auth_mode":store.sql_auth_mode,"shared_data":store.shared_data,
             "source_mode":store.source_mode,"enabled_sources":[layer for layer in ['gold','use_cases'] if store.layer_enabled(layer)],
             "analytics_layer":store.analytics_layer,"warnings":list(dict.fromkeys(warnings)),
             "analytics_catalog":store.catalog if store.analytics_layer=='gold' else store.use_cases_catalog,
@@ -424,7 +427,7 @@ def table_schema(name: str, user: Viewer = Depends(viewer), layer: Literal["gold
 
 @app.get("/api/connection")
 def connection_settings(user: Viewer = Depends(viewer)):
-    return {"mode":store.mode,"connection":store.connection()}
+    return {"mode":store.mode,"connection":store.connection(),"sql_auth_mode":store.sql_auth_mode,"shared_data":store.shared_data}
 
 
 @app.post("/api/connection")
@@ -432,6 +435,7 @@ def connect(settings:ConnectionSettings, user: Viewer = Depends(viewer)):
     if store.mode!='live':
         raise DataError('Sample mode uses local reference data. Connect live sources after deployment.',400)
     profile=settings.profile()
+    store.validate_connection(profile)
     token=ACTIVE_CONNECTION.set(profile)
     try:
         try:store.query('SELECT 1 AS connection_ok',{},user)
@@ -462,9 +466,13 @@ def workspace_schema(user: Viewer = Depends(viewer)):
     for catalog,schemas in locations.items():
         params={f"schema{i}":schema for i,schema in enumerate(sorted(schemas))}
         names=", ".join(":"+name for name in params)
+        allowed=''
+        if store.shared_data:
+            params.update({f'table{i}':name for i,name in enumerate(sorted(APP_TABLES))})
+            allowed=' AND table_name IN ('+', '.join(':'+key for key in params if key.startswith('table'))+')'
         safe_catalog="`"+catalog.replace("`","``")+"`"
         rows=store.query(f"SELECT table_catalog, table_schema, table_name, column_name, full_data_type FROM {safe_catalog}.information_schema.columns "
-            f"WHERE table_schema IN ({names}) ORDER BY table_schema, table_name, ordinal_position",params,user)
+            f"WHERE table_schema IN ({names}){allowed} ORDER BY table_schema, table_name, ordinal_position",params,user)
         for row in rows:
             key=(row['table_catalog'],row['table_schema'],row['table_name'])
             entry=tables.setdefault(key,{'catalog':key[0],'schema':key[1],'name':key[2],'columns':[]})
