@@ -6,7 +6,7 @@ type Result = { title: string; sql: string; columns: string[]; rows: unknown[][]
 type Answer = { conversation_id?: string; message_id?: string; conversation_key?: string; status: string; text: string; queries: Result[] };
 
 export function Genie() {
-  const config = useResource<{ mode: string; configured: boolean; examples: string[]; space_id: string }>('/api/genie/config');
+  const config = useResource<{ mode: string; configured: boolean; examples: string[]; space_id: string; auth_mode: 'app' | 'user'; shared_data: boolean }>('/api/genie/config');
   const [question, setQuestion] = useState('');
   const [turns, setTurns] = useState<{ question: string; answer?: Answer }[]>([]);
   const [session, setSession] = useState<{ conversation_id?: string; conversation_key?: string }>({});
@@ -47,8 +47,9 @@ export function Genie() {
   return <section className="genie-panel">
     <div className="genie-heading"><div><MessageSquare size={23} /><h2>Ask your marketing data</h2></div><button className="button secondary" disabled={busy} onClick={() => { setTurns([]); setSession({}); setError(''); }}>New conversation</button></div>
     <p>{config.data?.mode === 'preview' ? 'Guided sample answers from the source CSV fixture. Live Genie is not connected locally.' : 'Ask questions and follow up using the attached, curated Databricks Genie space.'}</p>
+    {config.data?.shared_data && <div className="scope-note">Genie uses the shared app dataset. Conversations are isolated to your browser session and signed-in account.</div>}
     <div className="scope-note">Genie uses its space’s curated tables and instructions. Dashboard filters and Connection Settings do not change that space. Include dates, currencies and the intended business population in your question.</div>
-    {!enabled && !config.loading && <div className="inline-error">Attach a Genie space with resource key genie-space and enable sql and genie user authorization scopes.</div>}
+    {!enabled && !config.loading && <div className="inline-error">Attach a Genie Agent with resource key genie-space and grant the configured identity access to its data.</div>}
     <div className="genie-examples">{config.data?.examples.map(example => <button key={example} disabled={busy || !enabled} onClick={() => send(example)}>{example}</button>)}</div>
     <div className="genie-history" aria-live="polite">{turns.map((turn, i) => <article key={i}><div className="genie-question">{turn.question}</div>{turn.answer && <div className="genie-answer"><strong>{config.data?.mode === 'preview' ? 'Sample analytics' : 'Genie'}</strong><p>{turn.answer.text || 'See the SQL and results below.'}</p>{turn.answer.queries.map((result, j) => <section key={j}><h3>{result.title}</h3><details><summary>View generated SQL</summary><pre>{result.sql}</pre></details>{result.error && <p className="inline-error">{result.error}</p>}{result.columns.length > 0 && <div className="table-scroll"><table><thead><tr>{result.columns.map((column, k) => <th key={k}>{column}</th>)}</tr></thead><tbody>{result.rows.map((row, r) => <tr key={r}>{row.map((cell, c) => <td key={c}>{cell === null ? '—' : typeof cell === 'object' ? JSON.stringify(cell) : String(cell)}</td>)}</tr>)}</tbody></table>{!result.rows.length && <p>No matching result rows.</p>}</div>}{result.truncated && <p>Showing the first available result chunk, limited to 100 rows.</p>}</section>)}</div>}</article>)}</div>
     {busy && <p role="status"><RefreshCw size={15} className="spinning" /> {status}…</p>}

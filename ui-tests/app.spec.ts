@@ -171,3 +171,112 @@ test('shared app access is explicit and the configured namespace is read-only', 
   await expect(page.getByRole('button',{name:'Verify & connect',exact:true})).toBeEnabled();
   await page.screenshot({path:'artifacts/app-identity-connection.png',fullPage:false});
 });
+
+test('More filters bind product, market, currency and plan values to the reports', async ({ page }) => {
+  const choices=await (await page.request.get('/api/bootstrap')).json();
+  const source=await (await page.request.get('/api/table/mart_banking_funded_accounts_monthly?size=1')).json();
+  const record=source.rows[0];
+  await page.goto('/');
+  await expect(page.locator('.metric-value').nth(2)).toHaveText('282');
+  await page.getByRole('button',{name:'More filters'}).click();
+  await expect(page.getByRole('group',{name:'Additional report filters'})).toBeVisible();
+  await page.getByLabel('Product',{exact:true}).selectOption(String(record.product_id));
+  await page.getByLabel('Market',{exact:true}).selectOption(String(record.market_id));
+  await page.getByLabel('Currency',{exact:true}).selectOption('USD');
+  const params=new URLSearchParams({product:String(record.product_id),market:String(record.market_id),currency:'USD'});
+  const expected=await (await page.request.get('/api/dashboard/overview?'+params)).json();
+  await expect(page.locator('.metric-value').nth(2)).toHaveText(String(expected.metrics[2].value));
+  await expect(page.locator('.metric-card').first()).toContainText('Unavailable for this selection');
+  const request=page.waitForRequest(req=>new URL(req.url()).pathname.startsWith('/api/dashboard/') && new URL(req.url()).searchParams.get('plan')===choices.plans[0]);
+  await page.getByLabel('Plan version',{exact:true}).selectOption(choices.plans[0]);
+  await request;
+  await expect(page.getByLabel('Plan version',{exact:true})).toHaveValue(choices.plans[0]);
+  await page.getByRole('button',{name:'Reset',exact:true}).click();
+  await expect(page.locator('.metric-value').nth(2)).toHaveText('282');
+  await expect(page.getByLabel('Plan version',{exact:true})).toHaveValue('');
+  await page.screenshot({path:'artifacts/advanced-filters.png',fullPage:false});
+});
+
+test('failed choices are explained without blank currency or plan controls and Refresh data reloads them', async ({ page }) => {
+  let loads=0;
+  await page.route('**/api/bootstrap',async route=>{
+    const response=await route.fetch();const body=await response.json();loads++;
+    if(loads===1){
+      for(const key of ['platforms','products','markets','currencies','plans']){
+        body[key]=[];
+        body.filter_status[key]={state:'unavailable',message:'Choices could not be loaded. Refresh data to retry.',sources:[],errors:['Test option failure']};
+      }
+    }
+    await route.fulfill({json:body});
+  });
+  await page.goto('/');
+  await expect(page.getByLabel('Platform',{exact:true})).toBeDisabled();
+  await page.getByRole('button',{name:'More filters'}).click();
+  for(const label of ['Product','Market','Currency','Plan version'])await expect(page.getByLabel(label,{exact:true})).toBeDisabled();
+  await expect(page.getByLabel('Currency',{exact:true}).locator('option:checked')).toHaveText('USD (not loaded)');
+  await expect(page.getByLabel('Plan version',{exact:true}).locator('option:checked')).toHaveText('Default plan');
+  await page.getByRole('button',{name:'Refresh data',exact:true}).click();
+  await expect(page.getByLabel('Platform',{exact:true})).toBeEnabled();
+  for(const label of ['Product','Market','Currency','Plan version'])await expect(page.getByLabel(label,{exact:true})).toBeEnabled();
+  expect(loads).toBeGreaterThan(1);
+  await page.getByLabel('Platform',{exact:true}).selectOption('meta');
+  await expect(page.locator('.metric-value').first()).not.toHaveText('$790.2K');
+});
+
+test('foundation refresh errors preserve the selected filters and usable prior choices', async ({ page }) => {
+  let loads=0;
+  await page.route('**/api/bootstrap',async route=>{
+    loads++;
+    if(loads>1)await route.fulfill({status:503,json:{detail:'Simulated metadata refresh failure'}});
+    else await route.continue();
+  });
+  await page.goto('/');
+  await page.getByLabel('Platform',{exact:true}).selectOption('meta');
+  await expect(page.locator('.metric-value').first()).not.toHaveText('$790.2K');
+  await page.getByRole('button',{name:'Refresh data',exact:true}).click();
+  await expect(page.getByRole('alert')).toContainText('Showing the last loaded options');
+  await expect(page.getByLabel('Platform',{exact:true})).toHaveValue('meta');
+  await expect(page.getByLabel('Platform',{exact:true})).toBeEnabled();
+  await expect(page.getByRole('heading',{name:'Executive overview',exact:true})).toBeVisible();
+});
+
+test('a reporting currency absent from available choices never renders as a blank selection', async ({ page }) => {
+  await page.route('**/api/bootstrap',async route=>{
+    const response=await route.fetch();const body=await response.json();
+    await route.fulfill({json:{...body,currencies:['EUR']}});
+  });
+  await page.goto('/');
+  await page.getByRole('button',{name:'More filters'}).click();
+  await expect(page.getByLabel('Currency',{exact:true})).toHaveValue('EUR');
+  await expect(page.getByLabel('Currency',{exact:true}).locator('option:checked')).toHaveText('EUR');
+});
+
+test('Genie shared app mode presents private chat without viewer scope setup', async ({ page }) => {
+  await page.route('**/api/genie/config',async route=>route.fulfill({json:{mode:'live',configured:true,space_id:'space-1',
+    auth_mode:'app',shared_data:true,examples:['Show spend by platform']}}));
+  await page.route('**/api/genie/messages',async route=>route.fulfill({json:{status:'COMPLETED',conversation_id:'conv-1',
+    message_id:'msg-1',conversation_key:'test-key',text:'Browser test response',queries:[]}}));
+  await page.goto('/');
+  await page.getByRole('navigation').getByRole('button',{name:'Ask Genie'}).click();
+  await expect(page.locator('.genie-panel')).toContainText('Conversations are isolated');
+  await page.getByRole('button',{name:'Show spend by platform',exact:true}).click();
+  await expect(page.locator('.genie-answer')).toContainText('Browser test response');
+  await expect(page.locator('.inline-error')).toHaveCount(0);
+});
+
+test('reference-inspired campaign scorecard presents names, business columns and cost context', async ({ page }) => {
+  await page.goto('/');
+  await expect(page.getByRole('heading',{name:'Campaign effectiveness',exact:true})).toBeVisible();
+  const report=page.locator('.compact-table');
+  await expect(report.locator('.report-context')).toContainText('Synthetic campaign cohorts');
+  await expect(report.locator('.report-grain')).toHaveText('Campaign / platform cohort');
+  await expect(report.locator('thead')).toContainText('Platform spend (USD)');
+  await expect(report.locator('.campaign-cell').first()).toBeVisible();
+  await expect(report.locator('.campaign-cell').first()).not.toHaveText(/^CMP\d+$/);
+  await expect(report.locator('thead')).not.toContainText('Campaign Match Token');
+  await report.getByRole('button',{name:'All columns',exact:true}).click();
+  await expect(report.locator('thead')).toContainText('Campaign Match Token');
+  await report.getByRole('button',{name:'Report columns',exact:true}).click();
+  await expect(report.locator('thead')).not.toContainText('Campaign Match Token');
+  await page.screenshot({path:'artifacts/campaign-effectiveness-scorecard.png',fullPage:true});
+});

@@ -11,7 +11,7 @@ from unittest.mock import patch
 
 from fastapi.testclient import TestClient
 from backend.catalog import PAGES, DATE_FIELDS, META_TABLES
-from backend.main import app, store
+from backend.main import app, store, FILTER_SOURCES
 from backend.store import ANALYTICS_MAPPING, APP_ROOT, DataError, identifier, preview_database
 
 spec=importlib.util.spec_from_file_location('app_subset_publisher',APP_ROOT/'notebooks/08_publish_app_gold_subset.py')
@@ -36,6 +36,7 @@ class SubsetContractTests(unittest.TestCase):
         self.assertEqual(len(publisher.MARTS),23)
         self.assertEqual(set(publisher.METADATA),META_TABLES)
         self.assertEqual(len(set(publisher.TABLES)),30)
+        self.assertTrue({table for sources in FILTER_SOURCES.values() for table,fields in sources}.issubset(publisher.MARTS))
 
     def test_metadata_only_advertises_copied_tables_and_keeps_snapshot_counts(self):
         source,counts=self.metadata();original=copy.deepcopy(source)

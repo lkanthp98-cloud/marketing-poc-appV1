@@ -16,7 +16,7 @@ from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, ConfigDict, Field
 
 from .catalog import DATE_FIELDS, DEMO_CAMPAIGN_TABLES, META_TABLES, MONTHLY, PAGES
-from . import genie
+from . import genie, session
 from .store import ACTIVE_CONNECTION, WORKSPACE_CONTRACT, ANALYTICS_MAPPING, APP_TABLES, APP_ROOT, DataError, Store, Viewer, identifier, normalize_json
 
 
@@ -54,6 +54,10 @@ async def data_error(request, error):
 @app.middleware("http")
 async def security_headers(request, call_next):
     profile={}
+    new_session=False
+    if store.mode=='live' and store.genie_auth_mode=='app':
+        browser_key,signed_cookie,new_session=session.resolve(request.cookies.get(session.COOKIE_NAME,''))
+        request.state.chat_session_key=browser_key
     cookie=request.cookies.get("marketing_connection")
     if cookie and store.mode=="live" and not store.shared_data:
         try:profile=ConnectionSettings.model_validate_json(cookie).profile()
@@ -61,6 +65,8 @@ async def security_headers(request, call_next):
     context_token=ACTIVE_CONNECTION.set(profile)
     try:response = await call_next(request)
     finally:ACTIVE_CONNECTION.reset(context_token)
+    if new_session:
+        response.set_cookie(session.COOKIE_NAME,signed_cookie,httponly=True,secure=True,samesite='lax',max_age=86400)
     response.headers["X-Content-Type-Options"] = "nosniff"
     response.headers["Referrer-Policy"] = "same-origin"
     if request.url.path.startswith("/api"):
@@ -72,9 +78,14 @@ def viewer(request: Request):
     if store.mode == "preview":
         return Viewer()
     token = request.headers.get("x-forwarded-access-token", "")
-    if not token and not store.shared_data:
+    auth_mode=store.genie_auth_mode if request.url.path.startswith('/api/genie/') else store.sql_auth_mode
+    if not token and auth_mode=='user':
+        if request.url.path.startswith('/api/genie/'):
+            raise DataError('Genie user mode is configured independently. Enable sql/genie user scopes and consent.',401)
         raise DataError("Sign in through Databricks Apps and enable user authorization with the SQL scope.", 401)
-    return Viewer(token, request.headers.get("x-forwarded-email", "App viewer" if store.shared_data else "Databricks viewer"))
+    return Viewer(token, request.headers.get("x-forwarded-email", "App viewer" if store.shared_data else "Databricks viewer"),
+                  getattr(request.state,'chat_session_key',''),json.dumps([
+                      request.headers.get('x-forwarded-user',''),request.headers.get('x-forwarded-email','')],separators=(',',':')))
 
 
 def query_filters(
@@ -163,7 +174,7 @@ def filter_sql(name, filters, user, layer=None):
             continue
         else:
             unsupported.append(key)
-    blocked=sorted(set(unsupported)&{'campaign','platform'})
+    blocked=sorted(set(unsupported)&{'campaign','platform','product','market'})
     if blocked:
         raise DataError('Unavailable for selected '+', '.join(blocked)+
             ' filter: '+name+' has no corresponding key at its published Gold grain. Clear this filter to see its overall total.',400)
@@ -258,6 +269,46 @@ def campaign_options(records, warnings):
     return sorted(result,key=lambda row:(row['campaign_name'].casefold(),row['campaign_key']))
 
 
+FILTER_SOURCES={
+    'platforms': [('mart_vendor_media_daily',('platform',)),('mart_demo_paid_media_daily',('platform',)),
+                  ('mart_demo_campaign_economics',('platform',)),('mart_demo_submission_funnel',('platform',))],
+    'products': [('mart_banking_funded_accounts_monthly',('product_id',)),
+                 ('mart_application_quality_monthly',('product_id',)),('mart_new_funded_customers_monthly',('product_id',))],
+    'markets': [('mart_banking_funded_accounts_monthly',('market_id',)),
+                ('mart_application_quality_monthly',('market_id','market_cd','market_code')),
+                ('mart_new_funded_customers_monthly',('market_id',))],
+    'currencies': [('mart_vendor_media_daily',('currency',)),('mart_demo_campaign_economics',('currency',))],
+    'plans': [('mart_sales_target_attainment_monthly',('plan_version',))],
+}
+
+
+def filter_choices(available,user):
+    """Load live choices independently and report partial failures without inventing values."""
+    def load(key):
+        values=set();errors=[];sources=[]
+        for table,candidates in FILTER_SOURCES[key]:
+            if table not in available:continue
+            sources.append(store.source_label(table))
+            try:
+                columns={c['name'] for c in store.columns(table,user)}
+                field=next((c for c in candidates if c in columns),None)
+                if not field:continue
+                rows=store.query(f'SELECT DISTINCT CAST({identifier(field)} AS STRING) AS value FROM '
+                    f'{store.table(table)} WHERE {identifier(field)} IS NOT NULL ORDER BY value',{},user)
+                values.update(str(row['value']) for row in rows if row.get('value') is not None and str(row['value']).strip())
+            except DataError as error:errors.append(table+': '+str(error))
+        state='available' if values else 'unavailable' if errors else 'empty'
+        noun={'platforms':'platform','products':'product','markets':'market','currencies':'currency','plans':'plan version'}[key]
+        message=('Some '+noun+' choices could not be loaded. Refresh data to retry.' if values and errors else
+                 noun.capitalize()+' choices could not be loaded. Refresh data or check dataset access.' if errors else
+                 'No '+noun+' values were returned by the published app datasets.' if not values else '')
+        return key,sorted(values),{'state':state,'message':message,'sources':sources,'errors':errors}
+    context=copy_context()
+    with ThreadPoolExecutor(max_workers=4) as pool:
+        results=list(pool.map(lambda key:context.copy().run(load,key),FILTER_SOURCES))
+    return {key:values for key,values,status in results},{key:status for key,values,status in results}
+
+
 @app.get("/api/bootstrap")
 def bootstrap(user: Viewer = Depends(viewer)):
     catalog = table_catalog(user)
@@ -270,13 +321,6 @@ def bootstrap(user: Viewer = Depends(viewer)):
         try:return store.query(sql,params or {},user)
         except DataError as error:
             warnings.append(str(error));return []
-    def options(table, field):
-        if not has(table):return []
-        try:columns={c['name'] for c in store.columns(table,user)}
-        except DataError as error:warnings.append(str(error));return []
-        if field not in columns:return []
-        return [row["value"] for row in safe_query(
-            f"SELECT DISTINCT {identifier(field)} AS value FROM {store.table(table)} WHERE {identifier(field)} IS NOT NULL ORDER BY {identifier(field)}")]
     # Resolve names from the conformed Gold master. ID-only rows never replace names.
     campaign_records=[]
     for source in ['dim_campaign','mart_vendor_media_daily','mart_demo_campaign_economics','mart_new_funded_customers_monthly']:
@@ -295,6 +339,8 @@ def bootstrap(user: Viewer = Depends(viewer)):
     dates=date_rows[0] if date_rows else {'start':'','end':''}
     dates={key:(str(value)[:10] if value else '') for key,value in dates.items()}
     coverage=safe_query(f"SELECT COUNT(*) AS sources FROM {store.table('gold_source_coverage','gold')}") if store.layer_enabled('gold') else []
+    choices,choice_status=filter_choices(available,user)
+    warnings.extend(error for status in choice_status.values() for error in status['errors'])
     return {"mode": store.mode, "viewer": user.label, "catalog": store.catalog, "schema": store.schema,
             "sql_auth_mode":store.sql_auth_mode,"shared_data":store.shared_data,
             "source_mode":store.source_mode,"enabled_sources":[layer for layer in ['gold','use_cases'] if store.layer_enabled(layer)],
@@ -302,9 +348,7 @@ def bootstrap(user: Viewer = Depends(viewer)):
             "analytics_catalog":store.catalog if store.analytics_layer=='gold' else store.use_cases_catalog,
             "analytics_schema":store.schema if store.analytics_layer=='gold' else store.use_cases_schema,"use_case_tables":use_cases,
             "tables": catalog, "sources": coverage[0]["sources"] if coverage else None, "dates": dates, "campaigns": campaigns,
-            "platforms": sorted(set(options(VENDOR_TABLE, "platform")+options('mart_demo_paid_media_daily','platform'))),
-            "products": options("mart_banking_funded_accounts_monthly", "product_id"), "markets": options("mart_banking_funded_accounts_monthly", "market_id"),
-            "currencies": options(VENDOR_TABLE, "currency"), "plans": options("mart_sales_target_attainment_monthly", "plan_version"),
+            **choices,"filter_status":choice_status,
             "pages": [{"id": key, "title": value["title"], "subtitle": value["subtitle"]} for key, value in PAGES.items()]}
 
 
@@ -482,14 +526,15 @@ def workspace_schema(user: Viewer = Depends(viewer)):
 
 class GenieQuestion(BaseModel):
     question:str=Field(min_length=1,max_length=4000)
-    conversation_id:str=''
-    conversation_key:str=''
+    conversation_id:str=Field(default='',max_length=100)
+    conversation_key:str=Field(default='',max_length=128)
 
 
 @app.get('/api/genie/config')
 def genie_config(user:Viewer=Depends(viewer)):
     import os
     return {'mode':store.mode,'configured':bool(os.getenv('GENIE_SPACE_ID')),'space_id':os.getenv('GENIE_SPACE_ID',''),
+        'auth_mode':store.genie_auth_mode,'shared_data':store.mode=='live' and store.genie_auth_mode=='app',
         'examples':genie.EXAMPLES,'dashboard_filters_apply':False}
 
 

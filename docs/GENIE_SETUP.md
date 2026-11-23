@@ -1,56 +1,39 @@
-# Genie analytics and automatic resource attachment
+# Shared Genie analytics and app-link access
 
-The new **Ask Genie** tab supports natural-language questions, follow-up conversations, answer text, generated SQL and result tables. It polls asynchronous Genie processing, displays failures/expired results, and limits displayed results to 100 rows from the first available result chunk. SQL returned by Genie is shown as text; the app does not replay it through its SQL query endpoint.
+The Ask Genie tab supports questions, follow-ups, generated SQL and result tables. The app displays Genie SQL and never replays it through its own SQL endpoint.
 
-Live Genie uses the signed-in viewer's forwarded token, not a shared service-principal fallback. Conversations are bound to the viewer/session and configured space. A new sign-in/token or app restart can require **New conversation**. Chat history stays in browser memory while navigating app tabs and resets on a full reload. No tokens are returned to the browser or stored with conversations.
+## Developer setup once
 
-## Prepare one Genie space
+1. Curate a Genie Agent on the retained business marts and dim_campaign in source-data.app_gold. Configure its SQL warehouse, approved metric definitions and tested questions. Suggested sources include mart_vendor_media_daily, mart_demo_campaign_economics, mart_new_funded_customers_monthly, mart_sales_target_attainment_monthly, mart_demo_three_source_cost_reconciliation, mart_demo_experiment_variant and mart_brand_survey_wave.
+2. Attach the warehouse to the Databricks app with key sql-warehouse and Can use. Attach the Genie Agent with key genie-space and Can run. These grants apply to the app service principal.
+3. Grant that principal USE CATALOG, USE SCHEMA and SELECT on the app_gold dataset using the existing setup SQL or owner helper. Agent resource attachment alone does not grant data access.
+4. Deploy with SQL_AUTH_MODE=app and GENIE_AUTH_MODE=app. Databricks supplies managed OAuth credentials; the bundle requests no delegated user data scopes.
+5. In App -> Share, select approved users/groups and grant Can Use, then share the app link. Viewers sign in to Databricks. They do not need personal warehouse, table or Genie permissions for these shared app calls. Review any All workspace users grant if only named people should have access.
 
-After running the 30-table app subset publisher, create or select a curated marketing Genie space in the same workspace as the app. Use the published datasets from `source-data.app_gold`, with approved KPI definitions. Suggested starting datasets:
+The Genie Agent owns its table selection and instructions. Dashboard filters and Connection settings do not alter the Agent. Include the intended dates, currency and reporting population in questions. Keep vendor delivery, demo cohorts and banking outcomes distinct. The attached Agent must reference the intended app_gold data and the app principal must be limited to that data. Use GENIE_SPACE_INSTRUCTIONS.txt as a business-context starting point and validate generated answers in the workspace.
 
-- `mart_vendor_media_daily`
-- `mart_demo_campaign_economics`
-- `mart_new_funded_customers_monthly`
-- `mart_sales_target_attainment_monthly`
-- `mart_demo_three_source_cost_reconciliation`
-- `mart_demo_experiment_variant`
-- `mart_brand_survey_wave`
+## Private conversations under a shared principal
 
-Add further datasets as needed for your business questions. Curate this space on Gold marts and conformed dimensions, including `dim_campaign` for campaign names. Do not add duplicate Use Cases publications. Put the relevant definitions from `GENIE_SPACE_INSTRUCTIONS.txt` into the space instructions. Its warehouse must be configured and viewers must have the necessary Genie, warehouse and table privileges.
+The Databricks Genie API sees the app principal as the conversation owner. This app binds every conversation key to a signed browser session, forwarded account identity when present, Agent, conversation ID and auth mode. A different browser/account cannot follow or poll another user's conversation through app endpoints, even with a captured conversation key. There is no history-list API for other users.
 
-The Genie space owns its dataset selection and business instructions. Dashboard Connection Settings and filters do not reconfigure that space. Include the desired dates, currency and population in questions. Curating a space improves answers but does not certify generated SQL or causal conclusions; review the SQL and its result before business use.
+A random signed session cookie is HttpOnly, Secure and SameSite=Lax. It contains no OAuth credentials. Conversation text remains in browser memory during tab navigation and resets on a full reload. Session/signing keys are process-local; after a restart or expired cookie, use New conversation. Administrators keep the platform's administrative visibility.
 
-## Automatic attachment when creating the app
+## Optional individual permissions
 
-The included **databricks.yml** defines the app, resource bindings and authorization scopes:
+GENIE_AUTH_MODE=user is available for deployments that require each user's Unity Catalog policies. That mode requires the forwarded user token, sql/genie scopes, consent and intended Agent/data access. SQL_AUTH_MODE can be configured separately. There is no automatic identity fallback after errors. User modes are not required for the requested shared-app-link workflow.
 
-| Resource key | Attachment | Permission |
-|---|---|---|
-| `sql-warehouse` | Your existing warehouse ID | `CAN_USE` |
-| `genie-space` | Your existing Genie space ID | `CAN_RUN` |
+## Automatic attachment
 
-`app.yaml` receives their IDs through `valueFrom`. The bundle declares user API scopes **sql** and **genie**. Catalog/schema defaults remain configured in `app.yaml`; viewer permissions on Unity Catalog data remain necessary. Resource bindings grant the app identity permissions and do not automatically grant every viewer access to data.
-
-From the extracted app directory, with the current Databricks CLI installed and authenticated, run:
+The included databricks.yml declares the SQL warehouse and Genie resources. With an authenticated owner CLI/SDK profile and requirements.txt installed:
 
 ```powershell
-.\deploy.ps1 -WarehouseId 'YOUR_WAREHOUSE_ID' -GenieSpaceId 'YOUR_GENIE_SPACE_ID' -AppName 'marketing-intelligence-genie' -Profile 'YOUR_CLI_PROFILE'
+.\deploy.ps1 -WarehouseId 'YOUR_WAREHOUSE_ID' -GenieSpaceId 'YOUR_GENIE_AGENT_ID' -AppName 'YOUR_APP_NAME' -Profile 'DEFAULT'
 ```
 
-This validates the bundle, creates/updates the bundle-managed app with both resources attached, uploads the source, and starts the app. Supply the two workspace-specific IDs once; they cannot be inferred from column exports. Add `-ValidateOnly` to validate without deployment. The person deploying needs permission to create/manage the app and attach the selected resources.
-
-Use a unique app name for a new bundle-managed deployment. For an existing manually created app, the UI route below updates its attachments without creating another app. This package does not create a Genie space or warehouse, assign viewer-wide table grants, or create new Unity Catalog tables. No deployment has been performed from this environment. The Databricks CLI was not installed here, so authenticated `bundle validate/deploy/run` still require workspace execution; the deployment script's PowerShell syntax was checked locally.
-
-## UI creation or updating an existing app
-
-Under **App resources**, attach the warehouse with key **sql-warehouse**, and the Genie space/agent with key **genie-space**, granting **Can use** and **Can run** respectively. Enable user authorization with both **sql** and **genie** scopes. Deploy this source folder. Uploading source containing `app.yaml` alone does not create those attachments; use the bundle/script for automatic attachment.
-
-Each viewer needs access to the app, Genie space, applicable warehouse and underlying tables. When the scopes change, users may need to consent again. Keep **DATA_MODE=live**. If Genie is unavailable in your workspace or the resource is not configured, the app reports the failure rather than serving local sample answers.
+The script validates/deploys the bundle, verifies the 30-table destination, grants the app read access through the owner helper and starts the app. It does not create another warehouse, Genie Agent or catalog tables. -ValidateOnly checks the bundle without deployment. Existing manually created apps can keep their attachments and be redeployed from the corrected ZIP; use the one-time setup SQL if grants are missing.
 
 ## Local verification
 
-In **DATA_MODE=preview**, the three suggested questions execute fixed, read-only queries on the CSV-derived local fixture. They are labeled **guided sample answers**, not live Genie responses. Arbitrary prompts do not produce fabricated answers. Open-ended language and contextual follow-ups require live Genie.
+Preview mode executes only the three guided sample questions on CSV-derived local data and labels them accordingly. Arbitrary sample prompts do not produce invented answers. Shared OAuth, account/browser isolation and API lifecycle are exercised with mocks; final live Genie answers, platform sharing and ACLs require workspace validation.
 
-Local checks: 37 backend tests and 6 browser scenarios passed, along with the production frontend build. Six backend checks specifically cover the later host/resource configuration fix; the UI is unchanged by that patch. Genie start/follow-up/poll/result APIs were mocked; no real Genie space or live warehouse was queried. The two SQL/Genie attachments and OAuth scopes use the official documented bundle/resource fields, but final API compatibility, permissions, deployment and answer reconciliation must be checked in your workspace.
-
-References: [Genie app resource](https://docs.databricks.com/aws/en/dev-tools/databricks-apps/genie), [app resources in bundles](https://docs.databricks.com/aws/en/dev-tools/bundles/resources#appresources), [bundle app deployment](https://docs.databricks.com/aws/en/dev-tools/bundles/apps-tutorial), [Genie conversation API](https://docs.databricks.com/api/genie/v1/genie-start-conversation).
+References: [Genie app resource](https://docs.databricks.com/aws/en/dev-tools/databricks-apps/genie), [Genie Agents API](https://docs.databricks.com/aws/en/genie-agents/conversation-api), [Databricks app sharing](https://docs.databricks.com/aws/en/dev-tools/databricks-apps/permissions).

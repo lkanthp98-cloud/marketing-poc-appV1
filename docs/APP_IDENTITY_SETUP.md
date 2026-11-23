@@ -2,7 +2,7 @@
 
 The previous deployed package always sent the viewer's forwarded token to SQL. Attaching sql-warehouse grants the **app service principal** access; it does not grant the viewer SQL scopes or warehouse access. A 403 on SELECT 1 occurs before table access, so reducing schema size cannot fix that authentication failure.
 
-The updated app.yaml explicitly sets **SQL_AUTH_MODE=app**, using the Databricks SDK's OAuth M2M provider with the platform-injected app credentials. It never uses a personal token, never requests secrets from a viewer, and never retries a rejected user request as another identity. SQL_AUTH_MODE=user remains available when individual user permissions are required. Changing modes requires a deployment restart.
+The updated app.yaml explicitly sets **SQL_AUTH_MODE=app** and **GENIE_AUTH_MODE=app**, using the Databricks SDK's OAuth M2M provider with platform-injected app credentials. Viewers need only Databricks App Can Use and sign-in; the developer configures resources/data once. It never uses a personal token, requests secrets from a viewer, or retries a rejected user request as another identity. Optional user modes remain available for individual permissions. Changing modes requires a deployment restart.
 
 ## Existing app: one-time setup
 
@@ -30,11 +30,11 @@ The helper discovers the app's service-principal application ID, verifies that s
 
 ## Verify the running version
 
-Open /api/runtime-config on the deployed app. The new build is **2026-11-23-explicit-app-oauth** and sql_auth_mode should be app. The endpoint exposes credential-presence booleans only. It does not return IDs, credentials, tokens or environment dumps.
+Open /api/runtime-config on the deployed app. The new build is **2026-11-23-share-link-access**; sql_auth_mode and genie_auth_mode should both be app. The endpoint exposes credential-presence booleans only. It does not return IDs, credentials, tokens or environment dumps.
 
 A later app-mode 403 names app-principal grants and includes the structured Databricks error code with sensitive values redacted. If the warehouse probe succeeds but Gold inventories fail, check the three schema grants. Changing the catalog or table count is not the response to a failed pre-source warehouse probe.
 
-Ask Genie deliberately remains user-authorized and needs its own sql/genie scopes, consent and space/table access. It never switches to the shared SQL identity. Dashboards can run in app mode without a forwarded user token even when Genie has not been configured.
+Ask Genie uses the app principal by explicit configuration. The attached genie-space Can run grant and app principal's data grants are required once. Private signed browser/account sessions bind each conversation, follow-up and poll; users cannot reuse each other's conversation keys through the app. GENIE_AUTH_MODE=user is optional and requires the viewer's own scopes/consent and data privileges. Neither mode falls back to the other.
 
 Verified locally with mocked OAuth/SQL responses and the 30-table sample. No live principal grants, OAuth token exchange or Databricks deployment was performed by this build process.
 

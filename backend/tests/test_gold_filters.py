@@ -74,7 +74,7 @@ class GoldFilterTests(unittest.TestCase):
     def test_platform_options_include_gold_demo_platforms_absent_from_vendor_rows(self):
         original=store.query
         def query(sql,params,user):
-            if 'SELECT DISTINCT `platform` AS value FROM `mart_demo_paid_media_daily`' in sql:
+            if 'CAST(`platform` AS STRING) AS value FROM `mart_demo_paid_media_daily`' in sql:
                 return [{'value':'demo_only_platform'}]
             return original(sql,params,user)
         with patch.object(store,'query',side_effect=query):

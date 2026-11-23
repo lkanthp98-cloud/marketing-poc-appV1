@@ -1,4 +1,4 @@
-"""User-authorized Genie chat proxy. Generated SQL is displayed, never replayed by the app."""
+"""Explicit app/user Genie OAuth, with private conversations under a shared app identity."""
 import hashlib
 import hmac
 import json
@@ -24,25 +24,37 @@ def space():
     return safe_id(value)
 
 
-def proof(user,conversation):
-    return hmac.new(_secret,(user.cache_key+'|'+space()+'|'+safe_id(conversation)).encode(),hashlib.sha256).hexdigest()
+def proof(user,conversation,auth_mode='user'):
+    if auth_mode=='app':
+        if not user.session_key:raise DataError('Reload the app to establish a private chat session.',401)
+        identity=hashlib.sha256((user.session_key+'|'+user.actor).encode()).hexdigest()
+    else:identity=user.cache_key
+    return hmac.new(_secret,(auth_mode+'|'+identity+'|'+space()+'|'+safe_id(conversation)).encode(),hashlib.sha256).hexdigest()
 
 
-def authorize(user,conversation,key):
-    if not hmac.compare_digest(proof(user,conversation),key or ''):
+def authorize(user,conversation,key,auth_mode='user'):
+    if not hmac.compare_digest(proof(user,conversation,auth_mode),key or ''):
         raise DataError('Start a new Genie conversation in this signed-in session.',403)
 
 
 def request(store,user,path,body=None):
-    if not user.token:raise DataError('Ask Genie uses user authorization independently of dashboard SQL mode. Enable sql and genie user scopes and sign in with consent.',401)
+    mode=store.genie_auth_mode
+    if mode=='user' and not user.token:
+        raise DataError('Genie user mode is configured independently. Enable sql/genie user scopes and consent.',401)
     store.validate_runtime(require_warehouse=False)
+    auth=store._app_headers() if mode=='app' else {'Authorization':'Bearer '+user.token}
     req=urllib.request.Request(store.host+'/api/2.0/genie/spaces/'+space()+path,
         data=json.dumps(body).encode() if body is not None else None,
-        headers={'Authorization':'Bearer '+user.token,'Content-Type':'application/json'})
+        headers={**auth,'Content-Type':'application/json'})
     try:
         with urllib.request.urlopen(req,timeout=25) as response:return json.load(response)
     except urllib.error.HTTPError as error:
-        if error.code in {401,403}:raise DataError('Enable the genie and sql user scopes, Genie space access and underlying table permissions.',403) from error
+        detail=store._error_detail(error,user.token,auth.get('Authorization',auth.get('authorization','')).removeprefix('Bearer '))
+        if error.code in {401,403}:
+            guidance=('Genie app mode: check the attached genie-space Can run grant and the app principal\'s '
+                'USE CATALOG, USE SCHEMA and SELECT on its curated app_gold data.' if mode=='app' else
+                'Genie user mode: enable genie/sql scopes and consent, Genie Agent access and user table permissions.')
+            raise DataError(guidance+detail,error.code) from None
         if error.code==429:raise DataError('Genie is busy. Wait briefly and retry.',429) from error
         raise DataError('Genie could not complete this request. Check the space configuration and workspace availability.') from error
     except (OSError,ValueError) as error:raise DataError('Genie is unavailable. Retry shortly.') from error
@@ -76,8 +88,10 @@ def normalize(store,user,message,conversation,message_id):
 
 
 def send(store,user,question,conversation='',key=''):
+    if store.genie_auth_mode=='app' and not user.session_key:
+        raise DataError('Reload the app to establish a private chat session.',401)
     if conversation:
-        authorize(user,conversation,key)
+        authorize(user,conversation,key,store.genie_auth_mode)
         response=request(store,user,f'/conversations/{safe_id(conversation)}/messages',{'content':question})
     else:response=request(store,user,'/start-conversation',{'content':question})
     message=response.get('message',response)
@@ -85,12 +99,12 @@ def send(store,user,question,conversation='',key=''):
     message_id=response.get('message_id') or message.get('message_id') or message.get('id')
     safe_id(conversation); safe_id(message_id)
     result=normalize(store,user,message,conversation,message_id)
-    result['conversation_key']=proof(user,conversation)
+    result['conversation_key']=proof(user,conversation,store.genie_auth_mode)
     return result
 
 
 def poll(store,user,conversation,message_id,key):
-    authorize(user,conversation,key)
+    authorize(user,conversation,key,store.genie_auth_mode)
     message=request(store,user,f'/conversations/{safe_id(conversation)}/messages/{safe_id(message_id)}')
     return normalize(store,user,message,conversation,message_id)
 

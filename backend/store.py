@@ -90,6 +90,8 @@ def preview_database():
 class Viewer:
     token: str = ""
     label: str = "Local preview"
+    session_key: str = ""
+    actor: str = ""
 
     @property
     def cache_key(self):
@@ -119,8 +121,9 @@ class Store:
         self._schema_cache = {}
         self._lock = threading.Lock()
         self.sql_auth_mode=os.getenv('SQL_AUTH_MODE','user').strip().lower()
-        if self.sql_auth_mode not in {'app','user'}:
-            raise RuntimeError('SQL_AUTH_MODE must be app or user; identities never switch automatically.')
+        self.genie_auth_mode=os.getenv('GENIE_AUTH_MODE',self.sql_auth_mode).strip().lower()
+        if self.sql_auth_mode not in {'app','user'} or self.genie_auth_mode not in {'app','user'}:
+            raise RuntimeError('SQL_AUTH_MODE and GENIE_AUTH_MODE must be app or user; identities never switch automatically.')
         self._app_config=None
         self._auth_lock=threading.Lock()
         # Use-case pages are application projections of Gold, never a second publication.
@@ -184,7 +187,8 @@ class Store:
         return ".".join(self.location(name, layer))
 
     def runtime_status(self):
-        return {'build':'2026-11-23-explicit-app-oauth','mode':self.mode,'source_mode':self.source_mode,
+        return {'build':'2026-11-23-share-link-access','mode':self.mode,'source_mode':self.source_mode,
+            'genie_auth_mode':self.genie_auth_mode,
             'sql_auth_mode':self.sql_auth_mode,'shared_app_dataset':self.shared_data,
             'app_client_id_present':bool(os.getenv('DATABRICKS_CLIENT_ID','').strip()),
             'app_client_secret_present':bool(os.getenv('DATABRICKS_CLIENT_SECRET','').strip()),

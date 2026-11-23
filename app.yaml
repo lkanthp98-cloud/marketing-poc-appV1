@@ -6,6 +6,8 @@ env:
     value: gold
   - name: SQL_AUTH_MODE
     value: app
+  - name: GENIE_AUTH_MODE
+    value: app
   - name: GOLD_CATALOG
     value: source-data
   - name: GOLD_SCHEMA
