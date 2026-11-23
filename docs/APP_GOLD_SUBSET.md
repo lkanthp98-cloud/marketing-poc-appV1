@@ -9,14 +9,14 @@ Default flow: **Bronze -> Silver -> Model -> Gold -> app_gold -> App**. DQX pass
 | Widget | Default | Meaning |
 |---|---|---|
 | source_catalog / source_schema | media-poc / gold | Existing completed Gold publication |
-| target_catalog / target_schema | media-poc / app_gold | Dedicated app destination; catalog must already exist |
+| target_catalog / target_schema | source-data / app_gold | Dedicated app destination; catalog must already exist |
 | object_budget | 450 | Conservative workspace object budget, capped at the user-reported ceiling of 500 |
 | extra_counted_objects | 0 | Add other known objects included in your platform quota but absent from the visible inventory |
 | run_mode | publish | Use plan for preflight without schema/table creation |
 
 Run all cells with a principal that can read the 30 selected source tables, inspect their Delta history, create a schema/tables in the destination and replace its own prior publication. Stop Gold refreshes and pause the app during publication. Refreshes are sequential across tables, not an atomic multi-table release. Failed runs must be investigated and rerun successfully before reopening the app.
 
-On success, the notebook prints **SUCCESS: exactly 30 tables published and reconciled** and the app connection values. Set the app's **Gold catalog = media-poc**, **Gold schema = app_gold**. Deployment `app.yaml` now uses this schema by default. Existing browsers retain their saved location until changed in Connection settings.
+On success, the notebook prints **SUCCESS: exactly 30 tables published and reconciled** and the app connection values. Set the app's **Gold catalog = source-data**, **Gold schema = app_gold**. Deployment `app.yaml` uses this location by default. Existing browsers retain their saved location until changed in Connection settings. If the tables are already published there, connect to them directly; no additional copy or publication run is needed just to use the app.
 
 The first run creates 30 additional managed Delta tables. It does not reduce the workspace total or remove the original Gold objects. Reruns replace the same 30 publisher-owned targets, without DROP/DELETE or persistent staging tables. Source and target must differ, and a destination containing unrelated objects is rejected. The publisher will not overwrite unmarked tables or unrelated existing app data.
 

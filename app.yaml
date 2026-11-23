@@ -5,7 +5,7 @@ env:
   - name: DATA_SOURCE_MODE
     value: gold
   - name: GOLD_CATALOG
-    value: media-poc
+    value: source-data
   - name: GOLD_SCHEMA
     value: app_gold
   - name: DATABRICKS_WAREHOUSE_ID

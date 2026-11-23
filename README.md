@@ -1,6 +1,6 @@
 # Marketing Intelligence - Gold-backed Databricks app
 
-All business pages build use-case analytics on **Gold**. For the dedicated app boundary, run [08_publish_app_gold_subset.ipynb](notebooks/08_publish_app_gold_subset.ipynb) to publish **23 marts + dim_campaign + six metadata tables** from `media-poc.gold` into `media-poc.app_gold`. Then connect the app to `media-poc.app_gold`; deployment now defaults to that location. A separate Use Cases schema is not required.
+All business pages build use-case analytics on **Gold**. For the dedicated app boundary, run [08_publish_app_gold_subset.ipynb](notebooks/08_publish_app_gold_subset.ipynb) to publish **23 marts + dim_campaign + six metadata tables** from `media-poc.gold` into `source-data.app_gold`. Then connect the app to `source-data.app_gold`; deployment now defaults to that location. A separate Use Cases schema is not required.
 
 The publisher creates **30 additional managed Delta tables** on the first run, so capacity must be available. It checks capacity, pins source versions, narrows metadata references and reconciles exact rows/types. It leaves source Gold unchanged and refreshes only its own destination tables. The app itself remains read-only. See [publication instructions and quota limitations](docs/APP_GOLD_SUBSET.md). This is not a confirmed fix for the separately reported telemetry error.
 

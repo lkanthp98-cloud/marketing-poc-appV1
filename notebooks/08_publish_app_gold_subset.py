@@ -2,7 +2,7 @@
 # MAGIC %md
 # MAGIC # Publish the app's 30-table Gold subset
 # MAGIC Run after Gold has completed, with Gold refreshes and the app paused during publication.
-# MAGIC Default: `media-poc.gold` -> `media-poc.app_gold`.
+# MAGIC Default: `media-poc.gold` -> `source-data.app_gold`.
 # MAGIC Copies 23 marts and `dim_campaign` without changing their business rows or column types.
 # MAGIC Rebuilds six metadata tables so the app advertises only this subset.
 # MAGIC First publication needs **30 additional table slots**. No source tables are changed,
@@ -186,7 +186,7 @@ def run_publisher(spark, dbutils):
     started = time.monotonic()
     def log(message):print(f'[{time.monotonic()-started:7.1f}s] {message}', flush=True)
     for key,default in [('source_catalog','media-poc'), ('source_schema','gold'),
-                        ('target_catalog','media-poc'), ('target_schema','app_gold'),
+                        ('target_catalog','source-data'), ('target_schema','app_gold'),
                         ('object_budget','450'), ('extra_counted_objects','0')]:
         dbutils.widgets.text(key,default)
     dbutils.widgets.dropdown('run_mode','publish',['publish','plan'])

@@ -20,7 +20,7 @@ Validation uses the source-derived local sample and supplied explorer CSV contra
 | Genie | Lifecycle, conversation isolation, sample answers, SQL/results and browser tab checked; no live Genie calls |
 | Audit notebook | Python syntax checked; Spark SQL audit execution pending in Databricks |
 | App publisher | Exact 30-table contract, narrowed lineage/readiness, capacity and overwrite guards checked locally |
-| Simulated app_gold namespace | All 24 KPI values and 18 chart results match the original fixture; no source-Gold data access |
+| Simulated source-data.app_gold namespace | All 24 KPI values and 18 chart results match the original fixture; no source-Gold data access |
 | Live schema browser | Restricted to the selected app schema |
 | Physical table changes | No live writes performed; publisher creates 30 app_gold tables on its first Databricks run |
 

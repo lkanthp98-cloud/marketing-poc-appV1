@@ -90,10 +90,10 @@ class SubsetContractTests(unittest.TestCase):
             'media-poc.gold.dim_campaign')
 
     def test_copy_sql_has_only_target_mutation_and_snapshot_lineage(self):
-        sql=publisher.create_sql('`media-poc`.`app_gold`.`dim_campaign`',
+        sql=publisher.create_sql('`source-data`.`app_gold`.`dim_campaign`',
             'SELECT * FROM `media-poc`.`gold`.`dim_campaign` VERSION AS OF 12',
             'media-poc.gold.dim_campaign',12,'test-run')
-        self.assertTrue(sql.startswith('CREATE OR REPLACE TABLE `media-poc`.`app_gold`.`dim_campaign`'))
+        self.assertTrue(sql.startswith('CREATE OR REPLACE TABLE `source-data`.`app_gold`.`dim_campaign`'))
         self.assertIn('VERSION AS OF 12',sql)
         self.assertIn("'marketing.app_subset.source_version'='12'",sql)
         for unsafe in ["a'b",'a`b','a\\b']:
@@ -129,11 +129,11 @@ class SubsetAppTests(unittest.TestCase):
                 self.assertEqual(params['schema'],'app_gold')
                 return [{'name':r['name'],'type':r['type']} for r in self.conn.execute('PRAGMA table_info('+identifier(params['name'])+')')]
             self.assertEqual(set(params.values()),{'app_gold'})
-            return [{'table_catalog':'media-poc','table_schema':'app_gold','table_name':n,
+            return [{'table_catalog':'source-data','table_schema':'app_gold','table_name':n,
                      'column_name':r['name'],'full_data_type':r['type']} for n in publisher.TABLES
                     for r in self.conn.execute('PRAGMA table_info('+identifier(n)+')')]
         self.assertNotIn('`media-poc`.`gold`',sql)
-        translated=sql.replace('`media-poc`.`app_gold`.','').replace(' AS STRING)',' AS TEXT)')
+        translated=sql.replace('`source-data`.`app_gold`.','').replace(' AS STRING)',' AS TEXT)')
         try:return [dict(r) for r in self.conn.execute(translated,params)]
         except sqlite3.Error as error:raise DataError(str(error)) from error
 
@@ -142,7 +142,7 @@ class SubsetAppTests(unittest.TestCase):
         with patch.object(store,'mode','preview'):
             baseline={page:baseline_client.get('/api/dashboard/'+page).json() for page in PAGES}
         with patch.object(store,'mode','live'),patch.object(store,'query',side_effect=self.warehouse):
-            response=self.client.post('/api/connection',json={'gold_catalog':'media-poc','gold_schema':'app_gold'},headers=self.headers)
+            response=self.client.post('/api/connection',json={'gold_catalog':'source-data','gold_schema':'app_gold'},headers=self.headers)
             self.assertEqual(response.status_code,200,response.text)
             self.assertEqual(response.json()['verified_source_objects'],{'gold':30})
             result=self.client.get('/api/bootstrap',headers=self.headers)
@@ -158,7 +158,7 @@ class SubsetAppTests(unittest.TestCase):
                 self.assertEqual(result.status_code,200,result.text)
                 self.assertFalse(any(m['unavailable_reason'] for m in result.json()['metrics']))
                 self.assertTrue(all(c['rows'] and not c.get('unavailable_reason') for c in result.json()['charts']))
-                self.assertTrue(all(m['source'].startswith('media-poc.app_gold.') for m in result.json()['metrics']))
+                self.assertTrue(all(m['source'].startswith('source-data.app_gold.') for m in result.json()['metrics']))
                 self.assertEqual([m['value'] for m in result.json()['metrics']],
                                  [m['value'] for m in baseline[page]['metrics']])
                 self.assertEqual([c['rows'] for c in result.json()['charts']],
